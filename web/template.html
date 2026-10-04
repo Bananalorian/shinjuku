@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Last Train to Shinjuku</title>
+<style>
+  :root {
+    --bg: #050407;
+    --fg: #f4efe2;
+    --dim: #8d8b93;
+    --accent: #6eb82e;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #050407; --fg: #f4efe2; }
+  }
+  :root[data-theme="dark"] { --bg: #050407; --fg: #f4efe2; }
+  html { height: 100%; scroll-padding-top: env(safe-area-inset-top, 0px); background: var(--bg); }
+  body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); overflow: hidden;
+         font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
+  #wrap { position: relative; width: 100%; height: 100%; }
+  canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: none;
+           -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  #status { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+            justify-content: center; gap: 10px; text-align: center; padding: 24px; pointer-events: none;
+            letter-spacing: 0.12em; }
+  #status b { color: var(--accent); font-size: 13px; }
+  #status span { color: var(--dim); font-size: 12px; max-width: 34em; line-height: 1.5; letter-spacing: 0.04em; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="glcanvas" tabindex="1"></canvas>
+  <div id="status"><b>LAST TRAIN TO SHINJUKU</b><span>Loading&hellip;</span></div>
+</div>
+<script>
+// Mobile audio unlock. iOS only lets audio start from a touchend/click, and mutes
+// Web Audio with the silent switch unless the audio session is "playback".
+// This must run before the macroquad bundle, which grabs AudioContext when it loads.
+(function () {
+  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
+  var Orig = window.AudioContext || window.webkitAudioContext;
+  if (!Orig) return;
+  var ctxs = [];
+  function Wrapped(opts) { var c = opts ? new Orig(opts) : new Orig(); ctxs.push(c); return c; }
+  Wrapped.prototype = Orig.prototype;
+  window.AudioContext = Wrapped;
+  window.webkitAudioContext = Wrapped;
+  function unlock() {
+    ctxs.forEach(function (c) {
+      if (c.state !== "running") {
+        try {
+          c.resume();
+          var s = c.createBufferSource();
+          s.buffer = c.createBuffer(1, 1, 22050);
+          s.connect(c.destination);
+          s.start(0);
+        } catch (e) {}
+      }
+    });
+  }
+  window.__sj_unlock = unlock; // the gamepad plugin calls this on button presses
+  ["touchend", "pointerup", "click", "keydown"].forEach(function (ev) {
+    document.addEventListener(ev, unlock, true);
+  });
+})();
+</script>
+<script>var register_plugin; // the bundle's quad_net plugin assigns this global</script>
+<script>
+/*__MQ_BUNDLE__*/
+</script>
+<script>
+// Gamepad plugin: hands the browser Gamepad API to the game (see src/pad.rs).
+// Writes [connected, standard, lx, ly, rx, ry, 17 button values] into wasm memory.
+miniquad_add_plugin({
+  name: "sj_gamepad",
+  version: 1,
+  register_plugin: function (io) {
+    var active = 0;
+    function pads() { return navigator.getGamepads ? navigator.getGamepads() : []; }
+    io.env.sj_pad_poll = function (ptr, len) {
+      var out = new Float32Array(wasm_memory.buffer, ptr, len);
+      out.fill(0);
+      var list = pads();
+      for (var i = 0; i < list.length; i++) {
+        var p = list[i];
+        if (!p || !p.connected) continue;
+        var busy = p.buttons.some(function (b) { return b.pressed; }) ||
+                   p.axes.some(function (a) { return Math.abs(a) > 0.3; });
+        if (busy) {
+          active = p.index;
+          if (window.__sj_unlock) window.__sj_unlock(); // some browsers count pad presses as a gesture
+        }
+      }
+      var p = list[active] || Array.prototype.find.call(list, function (x) { return x && x.connected; });
+      if (!p || !p.connected) return 0;
+      active = p.index;
+      out[0] = 1;
+      out[1] = p.mapping === "standard" ? 1 : 0;
+      for (var a = 0; a < 4 && a < p.axes.length; a++) out[2 + a] = p.axes[a];
+      for (var b = 0; b < 17 && b < p.buttons.length; b++) {
+        var btn = p.buttons[b];
+        out[6 + b] = btn.pressed ? Math.max(btn.value, 1) : Math.min(btn.value, 0.49);
+      }
+      return 1;
+    };
+    io.env.sj_pad_rumble = function (strong, weak, ms) {
+      var p = pads()[active];
+      var act = p && p.vibrationActuator;
+      if (act && act.playEffect) {
+        try { act.playEffect("dual-rumble", { duration: ms, strongMagnitude: strong, weakMagnitude: weak }); } catch (e) {}
+      }
+    };
+  }
+});
+</script>
+<script>
+(function () {
+  "use strict";
+  var WASM_B64 = "__WASM_B64__";
+  var status = document.getElementById("status");
+  var cv = document.getElementById("glcanvas");
+  cv.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+  cv.addEventListener("pointerdown", function () { cv.focus(); });
+  function fail(msg) {
+    status.innerHTML = "<b>COULDN'T START</b><span>" + msg + "</span>";
+  }
+  try {
+    var bin = atob(WASM_B64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    register_plugins(plugins);
+    WebAssembly.compile(bytes)
+      .then(function (mod) {
+        add_missing_functions_stabs(mod);
+        return WebAssembly.instantiate(mod, importObject);
+      })
+      .then(function (inst) {
+        wasm_memory = inst.exports.memory;
+        wasm_exports = inst.exports;
+        init_plugins(plugins);
+        status.style.display = "none";
+        cv.focus();
+        inst.exports.main();
+      })
+      .catch(function (e) {
+        console.error(e);
+        fail("This browser blocked WebAssembly or WebGL (" + (e && e.message ? e.message : e) + ").");
+      });
+  } catch (e) {
+    console.error(e);
+    fail(String(e && e.message ? e.message : e));
+  }
+})();
+</script>
+</body>
+</html>

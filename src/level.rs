@@ -1,0 +1,924 @@
+//! Station definitions and map building: the baked floor/wall image, props,
+//! lights, spawn points, collision, and the zombie flow field.
+
+use crate::art::Art;
+use crate::font;
+use crate::util::*;
+use macroquad::prelude::*;
+use std::collections::VecDeque;
+
+pub const WALL_H: f32 = 76.0;
+pub const TRACK_DROP: f32 = 6.0;
+pub const MARGIN: i32 = 5;
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Band {
+    Platform,
+    Track,
+    Concourse,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Tile {
+    Wall,
+    Platform,
+    Track,
+    Concourse,
+}
+
+pub struct StationDef {
+    pub name: &'static str,
+    pub code: &'static str,
+    pub width: i32,
+    pub bands: Vec<(Band, i32)>,
+    pub quota: u32,
+    pub max_alive: usize,
+    pub spawn_rate: (f32, f32),
+    pub mix: [f32; 3], // walker, runner, brute
+    pub ambient: Color,
+    pub wall: Color,
+    pub floor: Color,
+    pub lamp: Color,
+    pub neon: Vec<Color>,
+    pub flicker: f32,
+    pub boss: bool,
+    pub tagline: &'static str,
+}
+
+/// The route: clockwise up the Yamanote line from Akihabara to Shinjuku.
+pub fn stations() -> Vec<StationDef> {
+    use Band::*;
+    vec![
+        StationDef {
+            name: "AKIHABARA",
+            code: "JY03",
+            width: 34,
+            bands: vec![(Platform, 6), (Track, 3), (Platform, 7), (Track, 3), (Platform, 6)],
+            quota: 90,
+            max_alive: 110,
+            spawn_rate: (3.0, 7.0),
+            mix: [1.0, 0.0, 0.0],
+            ambient: Color::new(0.15, 0.10, 0.20, 1.0),
+            wall: rgb(214, 200, 210),
+            floor: rgb(140, 136, 140),
+            lamp: Color::new(0.85, 0.80, 1.0, 1.0),
+            neon: vec![rgb(255, 60, 200), rgb(40, 230, 255), rgb(255, 230, 60)],
+            flicker: 0.12,
+            boss: false,
+            tagline: "ELECTRIC TOWN. THE NEON NEVER WENT OUT.",
+        },
+        StationDef {
+            name: "UENO",
+            code: "JY05",
+            width: 38,
+            bands: vec![(Platform, 6), (Track, 3), (Platform, 7), (Track, 3), (Platform, 5), (Concourse, 5)],
+            quota: 140,
+            max_alive: 160,
+            spawn_rate: (4.0, 9.0),
+            mix: [1.0, 0.25, 0.0],
+            ambient: Color::new(0.09, 0.14, 0.15, 1.0),
+            wall: rgb(196, 210, 204),
+            floor: rgb(132, 138, 134),
+            lamp: Color::new(0.8, 1.0, 0.95, 1.0),
+            neon: vec![rgb(60, 220, 160), rgb(250, 250, 240)],
+            flicker: 0.2,
+            boss: false,
+            tagline: "THE PARK GATES ARE SHUT. THEY CAME UP THE STAIRS.",
+        },
+        StationDef {
+            name: "IKEBUKURO",
+            code: "JY13",
+            width: 40,
+            bands: vec![(Platform, 5), (Track, 3), (Platform, 7), (Track, 3), (Platform, 7), (Track, 3), (Platform, 5)],
+            quota: 190,
+            max_alive: 210,
+            spawn_rate: (5.0, 11.0),
+            mix: [1.0, 0.4, 0.08],
+            ambient: Color::new(0.17, 0.12, 0.07, 1.0),
+            wall: rgb(222, 206, 180),
+            floor: rgb(146, 138, 124),
+            lamp: Color::new(1.0, 0.86, 0.62, 1.0),
+            neon: vec![rgb(255, 140, 40), rgb(255, 210, 90)],
+            flicker: 0.25,
+            boss: false,
+            tagline: "TWO MILLION COMMUTERS A DAY. MOST NEVER LEFT.",
+        },
+        StationDef {
+            name: "TAKADANOBABA",
+            code: "JY15",
+            width: 38,
+            bands: vec![(Platform, 6), (Track, 3), (Platform, 8), (Track, 3), (Platform, 6), (Concourse, 5)],
+            quota: 240,
+            max_alive: 270,
+            spawn_rate: (6.0, 13.0),
+            mix: [1.0, 0.6, 0.15],
+            ambient: Color::new(0.05, 0.06, 0.11, 1.0),
+            wall: rgb(180, 190, 206),
+            floor: rgb(118, 122, 132),
+            lamp: Color::new(0.75, 0.85, 1.0, 1.0),
+            neon: vec![rgb(80, 120, 255)],
+            flicker: 0.5,
+            boss: false,
+            tagline: "THE LIGHTS ARE DYING. STAY IN THE LIGHT.",
+        },
+        StationDef {
+            name: "SHINJUKU",
+            code: "JY17",
+            width: 46,
+            bands: vec![
+                (Platform, 6),
+                (Track, 3),
+                (Platform, 6),
+                (Track, 3),
+                (Platform, 6),
+                (Track, 3),
+                (Platform, 6),
+                (Track, 3),
+                (Platform, 5),
+                (Concourse, 5),
+            ],
+            quota: 300,
+            max_alive: 340,
+            spawn_rate: (7.0, 15.0),
+            mix: [1.0, 0.7, 0.2],
+            ambient: Color::new(0.16, 0.05, 0.05, 1.0),
+            wall: rgb(210, 200, 196),
+            floor: rgb(130, 124, 124),
+            lamp: Color::new(1.0, 0.9, 0.85, 1.0),
+            neon: vec![rgb(255, 40, 40), rgb(255, 255, 255), rgb(120, 200, 255)],
+            flicker: 0.3,
+            boss: true,
+            tagline: "THE BUSIEST STATION ON EARTH. END OF THE LINE.",
+        },
+    ]
+}
+
+#[derive(Clone, Copy)]
+pub struct Obstacle {
+    pub min: Vec2,
+    pub max: Vec2,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum PropKind {
+    Pillar,
+    Vending(usize),
+    Bench,
+    Gate,
+    Bin,
+}
+
+#[derive(Clone, Copy)]
+pub struct Prop {
+    pub kind: PropKind,
+    pub pos: Vec2, // min corner in world tiles
+    pub size: Vec2,
+}
+
+#[derive(Clone, Copy)]
+pub struct LightDef {
+    pub pos: Vec2,
+    pub radius: f32,
+    pub color: Color,
+    pub flicker: f32,
+    pub phase: f32,
+    pub strobe: bool,
+}
+
+struct Sign {
+    u0: f32,
+    u1: f32,
+    text: String,
+}
+
+struct Ad {
+    u0: f32,
+    u1: f32,
+    a: Color,
+    b: Color,
+    pattern: u32,
+}
+
+pub struct Map {
+    pub w: i32,
+    pub h: i32,
+    pub gw: i32,
+    pub gh: i32,
+    pub tiles: Vec<Tile>,
+    pub blocked: Vec<bool>,
+    pub obstacles: Vec<Obstacle>,
+    obs_grid: Vec<Vec<u16>>,
+    pub props: Vec<Prop>,
+    pub lights: Vec<LightDef>,
+    pub tunnel_spawns: Vec<Vec2>,
+    pub edge_spawns: Vec<Vec2>,
+    pub track_ys: Vec<f32>,
+    pub floor: Image,
+    floor_mask: Vec<bool>,
+    pub floor_tex: Texture2D,
+    pub origin: Vec2,
+    dirty: Option<(i32, i32, i32, i32)>,
+    flow: Vec<u16>,
+    flow_cell: (i32, i32),
+}
+
+const FLOW_MAX: u16 = u16::MAX;
+
+impl Map {
+    pub fn build(def: &StationDef, index: usize, _art: &Art) -> Map {
+        let w = def.width;
+        let h = 1 + def.bands.iter().map(|b| b.1).sum::<i32>();
+        let gw = w + MARGIN;
+        let gh = h + MARGIN;
+
+        // row -> band lookup
+        let mut row_band = vec![Band::Concourse; gh as usize];
+        let mut band_ranges = Vec::new();
+        let mut y = 1;
+        for (b, n) in &def.bands {
+            band_ranges.push((*b, y, y + n));
+            for r in y..y + n {
+                row_band[r as usize] = *b;
+            }
+            y += n;
+        }
+        let last = def.bands.last().map(|b| b.0).unwrap_or(Band::Platform);
+        for r in y..gh {
+            row_band[r as usize] = if last == Band::Track { Band::Platform } else { last };
+        }
+
+        let mut tiles = vec![Tile::Platform; (gw * gh) as usize];
+        for ty in 0..gh {
+            for tx in 0..gw {
+                let t = if tx < 1 || ty < 1 {
+                    Tile::Wall
+                } else {
+                    match row_band[ty as usize] {
+                        Band::Platform => Tile::Platform,
+                        Band::Track => Tile::Track,
+                        Band::Concourse => Tile::Concourse,
+                    }
+                };
+                tiles[(ty * gw + tx) as usize] = t;
+            }
+        }
+
+        let track_bands: Vec<(i32, i32)> =
+            band_ranges.iter().filter(|b| b.0 == Band::Track).map(|b| (b.1, b.2)).collect();
+        let track_ys: Vec<f32> = track_bands.iter().map(|(a, b)| (*a + *b) as f32 * 0.5).collect();
+
+        let seed = 1000 + index as u32 * 77;
+        let mut props = Vec::new();
+        let mut obstacles = Vec::new();
+        let mut lights = Vec::new();
+        let add_prop = |kind: PropKind, center: Vec2, size: Vec2, solid: bool, props: &mut Vec<Prop>, obstacles: &mut Vec<Obstacle>| {
+            let pos = center - size * 0.5;
+            props.push(Prop { kind, pos, size });
+            if solid {
+                obstacles.push(Obstacle { min: pos, max: pos + size });
+            }
+        };
+
+        let neon = |i: u32| def.neon[(i as usize) % def.neon.len().max(1)];
+        let mut k = 0u32;
+        for (bi, (band, y0, y1)) in band_ranges.iter().enumerate() {
+            let (y0f, y1f) = (*y0 as f32, *y1 as f32);
+            let yc = (y0f + y1f) * 0.5;
+            let above_track = bi > 0 && band_ranges[bi - 1].0 == Band::Track;
+            let below_track = bi + 1 < band_ranges.len() && band_ranges[bi + 1].0 == Band::Track;
+            match band {
+                Band::Platform => {
+                    // ceiling lights
+                    let mut x = 2.5;
+                    while x < w as f32 - 1.0 {
+                        let f = if hash2(x as i32, *y0, seed) < def.flicker { 1.0 } else { 0.0 };
+                        lights.push(LightDef { pos: vec2(x, yc), radius: 3.4, color: def.lamp, flicker: f, phase: hash2(x as i32, 3, seed) * 10.0, strobe: false });
+                        x += 4.5;
+                    }
+                    if above_track && below_track {
+                        // island platform: pillar row with stuff between
+                        let mut x = 3.5;
+                        while x < w as f32 - 1.5 {
+                            add_prop(PropKind::Pillar, vec2(x, yc), vec2(0.75, 0.75), true, &mut props, &mut obstacles);
+                            let mx = x + 2.5;
+                            if mx < w as f32 - 2.0 {
+                                let r = hash2(mx as i32, *y0, seed + 1);
+                                if r < 0.35 {
+                                    let v = (hash2(mx as i32, 9, seed) * 3.0) as usize % 3;
+                                    add_prop(PropKind::Vending(v), vec2(mx, yc), vec2(0.85, 0.55), true, &mut props, &mut obstacles);
+                                    let lc = [rgb(255, 120, 120), rgb(120, 170, 255), rgb(255, 255, 240)][v];
+                                    lights.push(LightDef { pos: vec2(mx, yc + 0.9), radius: 1.7, color: lc, flicker: 0.0, phase: 0.0, strobe: false });
+                                } else if r < 0.75 {
+                                    add_prop(PropKind::Bench, vec2(mx, yc + 0.9), vec2(1.6, 0.42), true, &mut props, &mut obstacles);
+                                    add_prop(PropKind::Bench, vec2(mx, yc - 0.9), vec2(1.6, 0.42), true, &mut props, &mut obstacles);
+                                } else if r < 0.85 {
+                                    add_prop(PropKind::Bin, vec2(mx, yc), vec2(0.4, 0.4), true, &mut props, &mut obstacles);
+                                }
+                            }
+                            x += 5.0;
+                        }
+                    } else if *y0 == 1 {
+                        // against the back wall: vending machines and bins
+                        let mut x = 3.0;
+                        while x < w as f32 - 2.0 {
+                            let r = hash2(x as i32, 41, seed);
+                            if r < 0.4 {
+                                let v = (hash2(x as i32, 7, seed) * 3.0) as usize % 3;
+                                add_prop(PropKind::Vending(v), vec2(x, 1.45), vec2(0.85, 0.55), true, &mut props, &mut obstacles);
+                                let lc = [rgb(255, 120, 120), rgb(120, 170, 255), rgb(255, 255, 240)][v];
+                                lights.push(LightDef { pos: vec2(x, 2.3), radius: 1.7, color: lc, flicker: 0.0, phase: 0.0, strobe: false });
+                            } else if r < 0.6 {
+                                add_prop(PropKind::Bench, vec2(x, 1.5), vec2(1.6, 0.42), true, &mut props, &mut obstacles);
+                            } else if r < 0.7 {
+                                add_prop(PropKind::Bin, vec2(x, 1.4), vec2(0.4, 0.4), true, &mut props, &mut obstacles);
+                            }
+                            x += 3.0 + hash2(x as i32, 2, seed) * 2.0;
+                        }
+                    } else {
+                        let mut x = 4.0;
+                        while x < w as f32 - 2.0 {
+                            add_prop(PropKind::Pillar, vec2(x, yc + 0.5), vec2(0.75, 0.75), true, &mut props, &mut obstacles);
+                            x += 6.5;
+                        }
+                    }
+                }
+                Band::Concourse => {
+                    let gy = y0f + 1.6;
+                    let mut x = (w as f32 * 0.22).floor() + 0.5;
+                    while x < w as f32 * 0.78 {
+                        add_prop(PropKind::Gate, vec2(x, gy), vec2(0.3, 1.1), true, &mut props, &mut obstacles);
+                        x += 1.3;
+                    }
+                    let mut x = 3.0;
+                    while x < w as f32 - 1.0 {
+                        lights.push(LightDef { pos: vec2(x, yc), radius: 3.6, color: shade(def.lamp, 0.95), flicker: 0.0, phase: 0.0, strobe: false });
+                        x += 5.0;
+                    }
+                    let mut x = 6.0;
+                    while x < w as f32 - 2.0 {
+                        add_prop(PropKind::Pillar, vec2(x, y1f - 1.2), vec2(0.75, 0.75), true, &mut props, &mut obstacles);
+                        x += 7.0;
+                    }
+                }
+                Band::Track => {
+                    // red tunnel lamps and a colored neon glow down the line
+                    lights.push(LightDef { pos: vec2(1.5, yc - 1.4), radius: 1.2, color: rgb(255, 40, 30), flicker: 0.0, phase: k as f32, strobe: false });
+                    lights.push(LightDef { pos: vec2(1.5, yc + 1.4), radius: 1.2, color: rgb(255, 40, 30), flicker: 0.0, phase: k as f32 + 1.0, strobe: false });
+                    k += 1;
+                }
+            }
+        }
+
+        // signs and ads on the back wall
+        let mut signs = Vec::new();
+        let mut ads = Vec::new();
+        let name_w = font::text_width(def.name) as f32 * 0.25 + 1.2;
+        let mut u = 4.0;
+        let mut toggle = 0;
+        while u + name_w < w as f32 + 2.0 {
+            if toggle % 2 == 0 {
+                signs.push(Sign { u0: u, u1: u + name_w, text: def.name.to_string() });
+                lights.push(LightDef { pos: vec2(u + name_w * 0.5, 1.7), radius: 2.4, color: rgb(255, 255, 245), flicker: 0.0, phase: 0.0, strobe: false });
+                u += name_w + 2.0;
+            } else {
+                let aw = 2.4 + hash2(u as i32, 1, seed) * 1.6;
+                let a = neon(k);
+                let b = neon(k + 1);
+                ads.push(Ad { u0: u, u1: u + aw, a, b, pattern: (hash2(u as i32, 5, seed) * 4.0) as u32 });
+                lights.push(LightDef { pos: vec2(u + aw * 0.5, 1.8), radius: 2.2, color: a, flicker: if def.flicker > 0.4 { 1.0 } else { 0.0 }, phase: u, strobe: false });
+                k += 1;
+                u += aw + 1.5;
+            }
+            toggle += 1;
+        }
+        if def.boss {
+            // Shinjuku runs on emergency strobes
+            for i in 0..5 {
+                let x = 5.0 + i as f32 * (w as f32 - 8.0) / 4.0;
+                lights.push(LightDef { pos: vec2(x, h as f32 * 0.5), radius: 7.0, color: rgb(255, 30, 20), flicker: 0.0, phase: i as f32 * 1.3, strobe: true });
+            }
+        }
+
+        // spawn points
+        let tunnel_spawns = track_ys.iter().map(|y| vec2(1.2, *y)).collect();
+        let mut edge_spawns = Vec::new();
+        let mut yy = 1.5;
+        while yy < gh as f32 - 1.0 {
+            edge_spawns.push(vec2(w as f32 + 3.0, yy));
+            yy += 1.0;
+        }
+        let mut xx = 1.5;
+        while xx < gw as f32 - 1.0 {
+            edge_spawns.push(vec2(xx, h as f32 + 3.0));
+            xx += 1.0;
+        }
+
+        // blocked cells for the flow field
+        let mut blocked = vec![false; (gw * gh) as usize];
+        for ty in 0..gh {
+            for tx in 0..gw {
+                let c = vec2(tx as f32 + 0.5, ty as f32 + 0.5);
+                let mut b = tx < 1 || ty < 1;
+                for o in &obstacles {
+                    if c.x > o.min.x - 0.15 && c.x < o.max.x + 0.15 && c.y > o.min.y - 0.15 && c.y < o.max.y + 0.15 {
+                        b = true;
+                    }
+                }
+                blocked[(ty * gw + tx) as usize] = b;
+            }
+        }
+        let mut obs_grid = vec![Vec::new(); (gw * gh) as usize];
+        for (i, o) in obstacles.iter().enumerate() {
+            let x0 = ((o.min.x - 1.0).floor() as i32).max(0);
+            let x1 = ((o.max.x + 1.0).floor() as i32).min(gw - 1);
+            let y0 = ((o.min.y - 1.0).floor() as i32).max(0);
+            let y1 = ((o.max.y + 1.0).floor() as i32).min(gh - 1);
+            for ty in y0..=y1 {
+                for tx in x0..=x1 {
+                    obs_grid[(ty * gw + tx) as usize].push(i as u16);
+                }
+            }
+        }
+
+        let (floor, floor_mask, origin) = bake_floor(def, w, h, gw, gh, &tiles, &track_bands, &signs, &ads);
+        let floor_tex = Texture2D::from_image(&floor);
+        floor_tex.set_filter(FilterMode::Nearest);
+
+        Map {
+            w,
+            h,
+            gw,
+            gh,
+            tiles,
+            blocked,
+            obstacles,
+            obs_grid,
+            props,
+            lights,
+            tunnel_spawns,
+            edge_spawns,
+            track_ys,
+            floor,
+            floor_mask,
+            floor_tex,
+            origin,
+            dirty: None,
+            flow: vec![FLOW_MAX; (gw * gh) as usize],
+            flow_cell: (-1, -1),
+        }
+    }
+
+    pub fn tile(&self, x: f32, y: f32) -> Tile {
+        let (tx, ty) = (x.floor() as i32, y.floor() as i32);
+        if tx < 1 || ty < 1 {
+            return Tile::Wall;
+        }
+        if tx >= self.gw || ty >= self.gh {
+            return Tile::Platform;
+        }
+        self.tiles[(ty * self.gw + tx) as usize]
+    }
+
+    /// Visual height offset: things standing on the tracks sit lower.
+    pub fn ground_z(&self, p: Vec2) -> f32 {
+        if self.tile(p.x, p.y) == Tile::Track { -TRACK_DROP } else { 0.0 }
+    }
+
+    /// Push a circle out of walls and obstacles.
+    pub fn resolve(&self, p: &mut Vec2, r: f32, inner_only: bool) {
+        let maxx = if inner_only { self.w as f32 - 0.4 } else { self.gw as f32 - r };
+        let maxy = if inner_only { self.h as f32 - 0.4 } else { self.gh as f32 - r };
+        p.x = p.x.clamp(1.0 + r, maxx);
+        p.y = p.y.clamp(1.0 + r, maxy);
+        let (tx, ty) = (p.x.floor() as i32, p.y.floor() as i32);
+        if tx < 0 || ty < 0 || tx >= self.gw || ty >= self.gh {
+            return;
+        }
+        for &i in &self.obs_grid[(ty * self.gw + tx) as usize] {
+            let o = self.obstacles[i as usize];
+            let c = vec2(p.x.clamp(o.min.x, o.max.x), p.y.clamp(o.min.y, o.max.y));
+            let d = *p - c;
+            let dist = d.length();
+            if dist < r {
+                if dist > 1e-4 {
+                    *p += d / dist * (r - dist);
+                } else {
+                    // center is inside the box: push out along the shortest axis
+                    let left = p.x - o.min.x;
+                    let right = o.max.x - p.x;
+                    let up = p.y - o.min.y;
+                    let down = o.max.y - p.y;
+                    let m = left.min(right).min(up).min(down);
+                    if m == left {
+                        p.x = o.min.x - r;
+                    } else if m == right {
+                        p.x = o.max.x + r;
+                    } else if m == up {
+                        p.y = o.min.y - r;
+                    } else {
+                        p.y = o.max.y + r;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Does a point hit a wall or obstacle? (used by bullets)
+    pub fn solid_at(&self, p: Vec2) -> bool {
+        if p.x < 1.0 || p.y < 1.0 {
+            return true;
+        }
+        let (tx, ty) = (p.x.floor() as i32, p.y.floor() as i32);
+        if tx >= self.gw || ty >= self.gh {
+            return false;
+        }
+        for &i in &self.obs_grid[(ty * self.gw + tx) as usize] {
+            let o = self.obstacles[i as usize];
+            if p.x >= o.min.x && p.x <= o.max.x && p.y >= o.min.y && p.y <= o.max.y {
+                return true;
+            }
+        }
+        false
+    }
+
+    // ------------------------------------------------------------ flow field
+
+    pub fn update_flow(&mut self, target: Vec2) {
+        let (mut cx, mut cy) = (target.x.floor() as i32, target.y.floor() as i32);
+        cx = cx.clamp(1, self.gw - 1);
+        cy = cy.clamp(1, self.gh - 1);
+        if (cx, cy) == self.flow_cell {
+            return;
+        }
+        self.flow_cell = (cx, cy);
+        let gw = self.gw;
+        self.flow.iter_mut().for_each(|d| *d = FLOW_MAX);
+        let mut q = VecDeque::new();
+        self.flow[(cy * gw + cx) as usize] = 0;
+        q.push_back((cx, cy));
+        while let Some((x, y)) = q.pop_front() {
+            let d = self.flow[(y * gw + x) as usize];
+            for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
+                let (nx, ny) = (x + dx, y + dy);
+                if nx < 0 || ny < 0 || nx >= gw || ny >= self.gh {
+                    continue;
+                }
+                let ni = (ny * gw + nx) as usize;
+                if self.blocked[ni] || self.flow[ni] != FLOW_MAX {
+                    continue;
+                }
+                if dx != 0 && dy != 0 && (self.blocked[(y * gw + nx) as usize] || self.blocked[(ny * gw + x) as usize]) {
+                    continue;
+                }
+                self.flow[ni] = d + 1;
+                q.push_back((nx, ny));
+            }
+        }
+    }
+
+    pub fn flow_dir(&self, p: Vec2) -> Option<Vec2> {
+        let (x, y) = (p.x.floor() as i32, p.y.floor() as i32);
+        if x < 0 || y < 0 || x >= self.gw || y >= self.gh {
+            return None;
+        }
+        let gw = self.gw;
+        let cur = self.flow[(y * gw + x) as usize];
+        if cur == 0 || cur == FLOW_MAX {
+            return None;
+        }
+        let mut best = cur;
+        let mut dir = None;
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
+            let (nx, ny) = (x + dx, y + dy);
+            if nx < 0 || ny < 0 || nx >= gw || ny >= self.gh {
+                continue;
+            }
+            let d = self.flow[(ny * gw + nx) as usize];
+            if d < best {
+                if dx != 0 && dy != 0 && (self.blocked[(y * gw + nx) as usize] || self.blocked[(ny * gw + x) as usize]) {
+                    continue;
+                }
+                best = d;
+                dir = Some(vec2(nx as f32 + 0.5, ny as f32 + 0.5));
+            }
+        }
+        dir.map(|t| (t - p).normalize_or_zero())
+    }
+
+    // ------------------------------------------------------------ decals
+
+    /// Paint a splat into the baked floor. `kind` 0 = blood, 1 = scorch, 2 = dark blood.
+    pub fn stamp(&mut self, wp: Vec2, size: f32, kind: u32) {
+        let mut c = iso(wp.x, wp.y) - self.origin;
+        if self.tile(wp.x, wp.y) == Tile::Track {
+            c.y += TRACK_DROP;
+        }
+        let rx = (size * 18.0).max(1.0);
+        let ry = rx * 0.5;
+        let blobs: Vec<(Vec2, f32)> = (0..(2 + (size * 4.0) as usize).min(7))
+            .map(|i| {
+                let off = if i == 0 { Vec2::ZERO } else { rand_dir() * rnd(0.2, 0.9) * rx };
+                (vec2(off.x, off.y * 0.5), rnd(0.35, 0.8) * if i == 0 { 1.0 } else { 0.6 })
+            })
+            .collect();
+        let x0 = (c.x - rx * 1.8).floor() as i32;
+        let x1 = (c.x + rx * 1.8).ceil() as i32;
+        let y0 = (c.y - ry * 1.8).floor() as i32;
+        let y1 = (c.y + ry * 1.8).ceil() as i32;
+        let (iw, ih) = (self.floor.width as i32, self.floor.height as i32);
+        let (x0, x1, y0, y1) = (x0.max(0), x1.min(iw - 1), y0.max(0), y1.min(ih - 1));
+        if x0 >= x1 || y0 >= y1 {
+            return;
+        }
+        let s = rand::gen_range(0u32, 100000);
+        for py in y0..=y1 {
+            for px in x0..=x1 {
+                if !self.floor_mask[(py * iw + px) as usize] {
+                    continue;
+                }
+                let mut hit = false;
+                for (o, r) in &blobs {
+                    let d = vec2((px as f32 + 0.5 - c.x - o.x) / (rx * r), (py as f32 + 0.5 - c.y - o.y) / (ry * r));
+                    if d.length_squared() < 1.0 - hash2(px, py, s) * 0.35 {
+                        hit = true;
+                        break;
+                    }
+                }
+                if !hit {
+                    continue;
+                }
+                let old = self.floor.get_pixel(px as u32, py as u32);
+                let n = hash2(px, py, s + 1);
+                let (col, a) = match kind {
+                    0 => (Color::new(0.45 + n * 0.12, 0.03, 0.05, 1.0), 0.85),
+                    2 => (Color::new(0.24, 0.02, 0.03, 1.0), 0.9),
+                    _ => (Color::new(0.05 + n * 0.05, 0.045, 0.04, 1.0), 0.8),
+                };
+                self.floor.set_pixel(px as u32, py as u32, mix(old, col, a));
+            }
+        }
+        self.dirty = Some(match self.dirty {
+            None => (x0, y0, x1, y1),
+            Some((a, b, cc, d)) => (a.min(x0), b.min(y0), cc.max(x1), d.max(y1)),
+        });
+    }
+
+    /// Upload painted decals to the GPU once per frame.
+    pub fn flush(&mut self) {
+        if let Some((x0, y0, x1, y1)) = self.dirty.take() {
+            let (w, h) = (x1 - x0 + 1, y1 - y0 + 1);
+            let sub = self.floor.sub_image(Rect::new(x0 as f32, y0 as f32, w as f32, h as f32));
+            self.floor_tex.update_part(&sub, x0, y0, w, h);
+        }
+    }
+}
+
+// ---------------------------------------------------------------- baking the floor
+
+#[allow(clippy::too_many_arguments)]
+fn bake_floor(
+    def: &StationDef,
+    w: i32,
+    h: i32,
+    gw: i32,
+    gh: i32,
+    tiles: &[Tile],
+    tracks: &[(i32, i32)],
+    signs: &[Sign],
+    ads: &[Ad],
+) -> (Image, Vec<bool>, Vec2) {
+    let minx = -(gh as f32) * HALF_W;
+    let maxx = gw as f32 * HALF_W;
+    let miny = -WALL_H - 4.0;
+    let maxy = (gw + gh) as f32 * HALF_H;
+    let iw = (maxx - minx).ceil() as u32;
+    let ih = (maxy - miny).ceil() as u32;
+    let mut img = Image::gen_image_color(iw as u16, ih as u16, BLACK);
+    let mut mask = vec![false; (iw * ih) as usize];
+
+    let tile_at = |x: f32, y: f32| -> Tile {
+        let (tx, ty) = (x.floor() as i32, y.floor() as i32);
+        if tx < 1 || ty < 1 {
+            return Tile::Wall;
+        }
+        if tx >= gw || ty >= gh {
+            return Tile::Platform;
+        }
+        tiles[(ty * gw + tx) as usize]
+    };
+    let edge_dist = |y: f32| -> f32 {
+        let mut d = 99.0f32;
+        for (a, b) in tracks {
+            let (a, b) = (*a as f32, *b as f32);
+            if y < a {
+                d = d.min(a - y);
+            } else if y >= b {
+                d = d.min(y - b);
+            }
+        }
+        d
+    };
+    let track_center = |y: f32| -> f32 {
+        for (a, b) in tracks {
+            if y >= *a as f32 && y < *b as f32 {
+                return (*a + *b) as f32 * 0.5;
+            }
+        }
+        y
+    };
+    let fract = |v: f32| v - v.floor();
+
+    for iy in 0..ih {
+        for ix in 0..iw {
+            let sx = ix as f32 + 0.5 + minx;
+            let sy = iy as f32 + 0.5 + miny;
+            let a = sx / HALF_W;
+            let b = sy / HALF_H;
+            let x = (a + b) * 0.5;
+            let y = (b - a) * 0.5;
+            let n = hash2(ix as i32, iy as i32, 3);
+            let mut col: Option<Color> = None;
+            let mut is_floor = false;
+
+            if x < 1.0 || y < 1.0 {
+                // ---- walls
+                let xr = sx / HALF_W + 1.0;
+                let zr = (xr + 1.0) * HALF_H - sy;
+                let yc = 1.0 - sx / HALF_W;
+                let zc = (1.0 + yc) * HALF_H - sy;
+                if xr >= 1.0 && xr <= gw as f32 && (0.0..=WALL_H).contains(&zr) {
+                    col = Some(wall_row(def, xr, zr, signs, ads, n));
+                } else if yc >= 1.0 && yc <= gh as f32 && (0.0..=WALL_H).contains(&zc) {
+                    col = Some(wall_col(def, yc, zc, tracks, n));
+                } else {
+                    let b2 = (sy + WALL_H) / HALF_H;
+                    let xt = (a + b2) * 0.5;
+                    let yt = (b2 - a) * 0.5;
+                    if ((0.0..=1.0).contains(&yt) && xt >= 0.0 && xt <= gw as f32)
+                        || ((0.0..=1.0).contains(&xt) && yt >= 0.0 && yt <= gh as f32)
+                    {
+                        col = Some(rgb(16, 15, 18));
+                    }
+                }
+                // fade the far ends of the walls into darkness too
+                if let Some(c) = col {
+                    let along = if xr >= 1.0 { xr - w as f32 } else { yc - h as f32 };
+                    let k = 1.0 - smoothstep(0.0, 4.5, along);
+                    col = Some(shade(c, k.max(0.0)));
+                }
+            } else if x <= gw as f32 && y <= gh as f32 {
+                is_floor = true;
+                let t = tile_at(x, y);
+                let c = match t {
+                    Tile::Track => {
+                        let (lx, ly) = (x - TRACK_DROP / HALF_W, y - TRACK_DROP / HALF_W);
+                        let t2 = tile_at(lx, ly);
+                        if t2 == Tile::Wall {
+                            rgb(10, 8, 10)
+                        } else if t2 != Tile::Track {
+                            // the platform's edge face
+                            let depth = (ly.ceil() - ly).clamp(0.0, 1.0);
+                            shade(rgb(92, 90, 88), 0.55 + depth * 0.35 + n * 0.08)
+                        } else {
+                            let local = ly - track_center(ly);
+                            let al = local.abs();
+                            if (0.5..0.62).contains(&al) {
+                                if al < 0.545 { rgb(200, 204, 212) } else { rgb(110, 112, 120) }
+                            } else if fract(lx * 2.0) < 0.26 && al < 0.85 {
+                                shade(rgb(96, 84, 72), 0.8 + n * 0.3)
+                            } else {
+                                shade(rgb(52, 48, 46), 0.65 + n * 0.55)
+                            }
+                        }
+                    }
+                    Tile::Platform | Tile::Wall => {
+                        let d = edge_dist(y);
+                        let base = def.floor;
+                        if d < 0.09 {
+                            rgb(226, 224, 214)
+                        } else if (0.3..0.62).contains(&d) {
+                            let bump = (fract(x * 8.0) - 0.5).powi(2) + (fract(y * 8.0) - 0.5).powi(2) < 0.09;
+                            if bump { rgb(252, 214, 70) } else { rgb(222, 172, 34) }
+                        } else if (0.85..1.05).contains(&d) && (0.42..0.58).contains(&fract(x / 4.0)) {
+                            rgb(70, 170, 90)
+                        } else {
+                            let grout = fract(x * 2.0) < 0.05 || fract(y * 2.0) < 0.05;
+                            let tile_var = hash2((x * 2.0) as i32, (y * 2.0) as i32, 9) * 0.08;
+                            shade(base, if grout { 0.8 } else { 0.94 + tile_var + n * 0.04 })
+                        }
+                    }
+                    Tile::Concourse => {
+                        let checker = ((x.floor() + y.floor()) as i32) % 2 == 0;
+                        let grout = fract(x) < 0.04 || fract(y) < 0.04;
+                        let base = if checker { rgb(158, 146, 122) } else { rgb(136, 126, 106) };
+                        shade(base, if grout { 0.75 } else { 0.95 + n * 0.06 })
+                    }
+                };
+                let out = (x - w as f32).max(y - h as f32);
+                let k = 1.0 - smoothstep(0.0, 4.5, out);
+                col = Some(shade(c, k.max(0.0)));
+                if k < 0.05 {
+                    is_floor = false;
+                }
+            }
+            if let Some(c) = col {
+                img.set_pixel(ix, iy, c);
+            }
+            mask[(iy * iw + ix) as usize] = is_floor;
+        }
+    }
+    (img, mask, vec2(minx, miny))
+}
+
+fn wall_row(def: &StationDef, u: f32, z: f32, signs: &[Sign], ads: &[Ad], n: f32) -> Color {
+    let green = rgb(110, 178, 46);
+    if z < 4.0 {
+        return rgb(46, 46, 52);
+    }
+    if z > 62.0 {
+        return if z < 63.5 { rgb(80, 80, 88) } else { rgb(34, 34, 40) };
+    }
+    if (50.0..54.0).contains(&z) {
+        return if z > 53.0 { shade(green, 1.2) } else { green };
+    }
+    for s in signs {
+        if u >= s.u0 && u <= s.u1 && (16.0..38.0).contains(&z) {
+            let frame = z < 17.5 || z > 36.5 || u < s.u0 + 0.12 || u > s.u1 - 0.12;
+            if frame {
+                return rgb(30, 30, 36);
+            }
+            if z > 33.0 {
+                return green;
+            }
+            if z < 19.0 {
+                return shade(green, 0.85);
+            }
+            let fx = ((u - s.u0 - 0.6) / 0.25).floor();
+            let fy = ((32.5 - z) / 2.0).floor();
+            if fx >= 0.0 && fy >= 0.0 {
+                let fx = fx as usize;
+                let ci = fx / (font::GW + 1);
+                let cx = fx % (font::GW + 1);
+                if let Some(ch) = s.text.chars().nth(ci) {
+                    if font::bit(ch, cx, fy as usize) {
+                        return rgb(20, 20, 26);
+                    }
+                }
+            }
+            return rgb(244, 244, 236);
+        }
+    }
+    for ad in ads {
+        if u >= ad.u0 && u <= ad.u1 && (14.0..40.0).contains(&z) {
+            let frame = z < 15.0 || z > 39.0 || u < ad.u0 + 0.1 || u > ad.u1 - 0.1;
+            if frame {
+                return rgb(20, 20, 24);
+            }
+            let tu = (u - ad.u0) / (ad.u1 - ad.u0);
+            let tz = (z - 14.0) / 26.0;
+            let base = mix(ad.a, ad.b, tz);
+            let shape = match ad.pattern {
+                0 => (vec2(tu - 0.5, (tz - 0.55) * 0.6)).length() < 0.22,
+                1 => ((tu * 6.0 + tz * 4.0) as i32) % 2 == 0,
+                2 => (0.2..0.35).contains(&tz) || (0.6..0.7).contains(&tz),
+                _ => tu > 0.15 && tu < 0.85 && (0.45..0.85).contains(&tz) && ((tu * 10.0) as i32 % 2 == 0),
+            };
+            return if shape { shade(base, 1.35) } else { shade(base, 0.75) };
+        }
+    }
+    let ui = (u * 16.0) as i32;
+    let grout = ui % 4 == 0 || (z as i32) % 5 == 0;
+    shade(def.wall, if grout { 0.72 } else { 0.86 + n * 0.06 })
+}
+
+fn wall_col(def: &StationDef, u: f32, z: f32, tracks: &[(i32, i32)], n: f32) -> Color {
+    for (a, b) in tracks {
+        let cy = (*a + *b) as f32 * 0.5;
+        let du = (u - cy).abs();
+        let hw = 1.45;
+        if du < hw + 0.25 {
+            let top = 30.0 + 8.0 * (1.0 - (du / (hw + 0.25)).powi(2)).max(0.0).sqrt();
+            if du < hw && z < top - 2.0 {
+                // tunnel mouth: darkness with a few distant lamps
+                let far = hash2((u * 16.0) as i32, z as i32, 8) > 0.996;
+                return if far { rgb(120, 30, 20) } else { rgb(4, 3, 5) };
+            }
+            if z < top + 1.5 {
+                return shade(rgb(84, 82, 86), 0.8 + n * 0.1);
+            }
+        }
+    }
+    let shaded = shade(def.wall, 0.72);
+    if z < 4.0 {
+        return rgb(40, 40, 46);
+    }
+    if z > 62.0 {
+        return if z < 63.5 { rgb(70, 70, 78) } else { rgb(28, 28, 34) };
+    }
+    if (50.0..54.0).contains(&z) {
+        return shade(rgb(110, 178, 46), 0.8);
+    }
+    let ui = (u * 16.0) as i32;
+    let grout = ui % 4 == 0 || (z as i32) % 5 == 0;
+    shade(shaded, if grout { 0.78 } else { 0.95 + n * 0.06 })
+}
