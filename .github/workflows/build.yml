@@ -75,6 +75,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # same Python on every OS (Windows runners don't ship a `python3` command)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Linux libraries (sound + controllers)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev pkg-config
@@ -92,7 +96,7 @@ jobs:
             target/aarch64-apple-darwin/release/shinjuku \
             target/x86_64-apple-darwin/release/shinjuku
       - name: Package
-        run: python3 .github/package.py ${{ matrix.name }}
+        run: python .github/package.py ${{ matrix.name }}
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
