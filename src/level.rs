@@ -1,7 +1,7 @@
 //! Station definitions and map building: the baked floor/wall image, props,
 //! lights, spawn points, collision, and the zombie flow field.
 
-use crate::art::Art;
+use crate::art::{build_signs, Art, SignArt};
 use crate::font;
 use crate::util::*;
 use macroquad::prelude::*;
@@ -157,6 +157,8 @@ pub fn stations() -> Vec<StationDef> {
 pub struct Obstacle {
     pub min: Vec2,
     pub max: Vec2,
+    /// Waist-high: blocks walking but bullets fly over it.
+    pub low: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -166,6 +168,62 @@ pub enum PropKind {
     Bench,
     Gate,
     Bin,
+    Psd,
+    SignName,
+    SignLed,
+    Kiosk,
+    Suitcase(usize),
+    Boxes,
+    Barrier,
+}
+
+impl PropKind {
+    /// Tall things that should fade out when the player walks behind them.
+    pub fn occludes(&self) -> bool {
+        matches!(self, PropKind::Pillar | PropKind::SignName | PropKind::SignLed | PropKind::Kiosk | PropKind::Vending(_))
+    }
+}
+
+/// Train composition shared by the world (train sprites) and the map (door gaps).
+/// 0 = cab, 1 = body, 2 = door, 3 = gap between cars.
+pub fn train_pattern() -> Vec<u8> {
+    let mut v = Vec::new();
+    for car in 0..4 {
+        v.extend_from_slice(&[if car == 0 { 0 } else { 1 }, 1, 2, 1, 1, 2, 1]);
+        if car < 3 {
+            v.push(3);
+        }
+    }
+    v
+}
+
+/// Where the train's head stops at a station of width `w`.
+pub fn train_stop_head(w: i32) -> f32 {
+    (w - 2) as f32
+}
+
+/// Centers of the train doors when stopped; platform screen doors leave gaps here.
+pub fn door_xs(w: i32) -> Vec<f32> {
+    let head = train_stop_head(w);
+    train_pattern()
+        .iter()
+        .enumerate()
+        .filter(|(_, k)| **k == 2)
+        .map(|(i, _)| head - 1.0 - i as f32 + 0.5)
+        .filter(|x| *x > 1.8)
+        .collect()
+}
+
+/// Tiny deterministic RNG for laying out each station the same way every time.
+struct Lcg(u32);
+impl Lcg {
+    fn f(&mut self) -> f32 {
+        self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (self.0 >> 8) as f32 / 16_777_216.0
+    }
+    fn range(&mut self, a: f32, b: f32) -> f32 {
+        a + self.f() * (b - a)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -213,6 +271,8 @@ pub struct Map {
     pub tunnel_spawns: Vec<Vec2>,
     pub edge_spawns: Vec<Vec2>,
     pub track_ys: Vec<f32>,
+    pub signs: SignArt,
+    walls_h: Vec<bool>, // wall between cell (x, y) and (x, y + 1): platform screen doors
     pub floor: Image,
     floor_mask: Vec<bool>,
     pub floor_tex: Texture2D,
@@ -225,7 +285,7 @@ pub struct Map {
 const FLOW_MAX: u16 = u16::MAX;
 
 impl Map {
-    pub fn build(def: &StationDef, index: usize, _art: &Art) -> Map {
+    pub fn build(def: &StationDef, index: usize, next: &str, _art: &Art) -> Map {
         let w = def.width;
         let h = 1 + def.bands.iter().map(|b| b.1).sum::<i32>();
         let gw = w + MARGIN;
@@ -275,7 +335,8 @@ impl Map {
             let pos = center - size * 0.5;
             props.push(Prop { kind, pos, size });
             if solid {
-                obstacles.push(Obstacle { min: pos, max: pos + size });
+                let low = matches!(kind, PropKind::Bench | PropKind::Gate | PropKind::Bin);
+                obstacles.push(Obstacle { min: pos, max: pos + size, low });
             }
         };
 
@@ -369,15 +430,128 @@ impl Map {
             }
         }
 
+        // ---- platform screen doors along every platform edge, gaps where train doors stop
+        let doors = door_xs(w);
+        let mut walls_h = vec![false; (gw * gh) as usize];
+        let platform_row = |r: i32| r >= 1 && r < h && row_band[r as usize] != Band::Track;
+        for (a, b) in &track_bands {
+            for (edge_ok, panel_y, wall_row) in [(platform_row(a - 1), *a as f32 - 0.16, a - 1), (platform_row(*b), *b as f32, b - 1)] {
+                if !edge_ok {
+                    continue;
+                }
+                let mut run: Option<f32> = None;
+                let mut x = 1.5;
+                loop {
+                    let end = x + 0.5 > w as f32 - 0.5;
+                    let in_gap = doors.iter().any(|d| (x + 0.25 - d).abs() < 0.6);
+                    if end || in_gap {
+                        if let Some(x0) = run.take() {
+                            obstacles.push(Obstacle { min: vec2(x0, panel_y), max: vec2(x, panel_y + 0.16), low: true });
+                        }
+                        if end {
+                            break;
+                        }
+                    } else {
+                        props.push(Prop { kind: PropKind::Psd, pos: vec2(x, panel_y), size: vec2(0.5, 0.16) });
+                        run.get_or_insert(x);
+                    }
+                    x += 0.5;
+                }
+                for cx in 1..w {
+                    let gap = doors.iter().any(|d| (cx as f32 + 0.5 - d).abs() < 0.1);
+                    if !gap {
+                        walls_h[(wall_row * gw + cx) as usize] = true;
+                    }
+                }
+            }
+        }
+
+        // ---- hanging signs over the platforms: station name boards and LED departure boards
+        let signs = build_signs(def.name, next);
+
+        let mut k_sign = 0;
+        for (band, y0, y1) in &band_ranges {
+            if *band != Band::Platform || y1 - y0 < 5 {
+                continue;
+            }
+            let yc = (*y0 + *y1) as f32 * 0.5 - 0.06;
+            let mut x = 5.5 + (k_sign % 2) as f32 * 4.0;
+            while x < w as f32 - 6.0 {
+                let led = k_sign % 2 == 1;
+                let (spr, kind) = if led { (signs.led[0], PropKind::SignLed) } else { (signs.name, PropKind::SignName) };
+                let fx = (spr.r.w - spr.anchor.x) / HALF_W; // footprint length from the sprite
+                props.push(Prop { kind, pos: vec2(x, yc), size: vec2(fx.max(1.0), 0.12) });
+                k_sign += 1;
+                x += 12.0;
+            }
+        }
+
+        // ---- clutter: a kiosk, abandoned luggage, boxes, barriers
+        let mut rng = Lcg(seed.wrapping_mul(2_654_435_761));
+        let edge_dist_y = |y: f32| -> f32 {
+            let mut d = 99.0f32;
+            for (a, b) in &track_bands {
+                let (a, b) = (*a as f32, *b as f32);
+                if y < a { d = d.min(a - y); } else if y >= b { d = d.min(y - b); }
+            }
+            d
+        };
+        let free = |c: Vec2, half: Vec2, obstacles: &Vec<Obstacle>, props: &Vec<Prop>| -> bool {
+            if c.x - half.x < 1.8 || c.x + half.x > w as f32 - 1.0 || c.y - half.y < 1.3 || c.y + half.y > h as f32 - 0.8 {
+                return false;
+            }
+            let ty = c.y.floor() as i32;
+            if ty < 1 || ty >= h || row_band[ty as usize] == Band::Track || edge_dist_y(c.y) < 0.9 {
+                return false;
+            }
+            let m = 0.45;
+            let hit_o = obstacles.iter().any(|o| c.x + half.x + m > o.min.x && c.x - half.x - m < o.max.x && c.y + half.y + m > o.min.y && c.y - half.y - m < o.max.y);
+            let hit_p = props.iter().any(|p| c.x + half.x + m > p.pos.x && c.x - half.x - m < p.pos.x + p.size.x && c.y + half.y + m > p.pos.y && c.y - half.y - m < p.pos.y + p.size.y && !matches!(p.kind, PropKind::SignName | PropKind::SignLed));
+            !hit_o && !hit_p
+        };
+        // the kiosk goes against the back wall, or on the concourse
+        for _ in 0..40 {
+            let c = vec2(rng.range(4.0, w as f32 - 5.0), 1.85);
+            let half = vec2(1.1, 0.5);
+            if free(c, half, &obstacles, &props) {
+                props.push(Prop { kind: PropKind::Kiosk, pos: c - half, size: half * 2.0 });
+                obstacles.push(Obstacle { min: c - half, max: c + half, low: false });
+                lights.push(LightDef { pos: c + vec2(0.0, 1.0), radius: 2.6, color: rgb(255, 236, 190), flicker: 0.0, phase: 0.0, strobe: false });
+                break;
+            }
+        }
+        let n_luggage = 6 + index * 2;
+        let mut placed = 0;
+        for _ in 0..200 {
+            if placed >= n_luggage {
+                break;
+            }
+            let c = vec2(rng.range(2.0, w as f32 - 1.5), rng.range(1.6, h as f32 - 1.0));
+            let roll = rng.f();
+            let (kind, half) = if roll < 0.55 {
+                let v = (rng.f() * 4.0) as usize % 4;
+                (PropKind::Suitcase(v), if v == 3 { vec2(0.225, 0.15) } else { vec2(0.15, 0.09) })
+            } else if roll < 0.85 {
+                (PropKind::Boxes, vec2(0.3, 0.25))
+            } else {
+                (PropKind::Barrier, vec2(0.5, 0.07))
+            };
+            if free(c, half, &obstacles, &props) {
+                props.push(Prop { kind, pos: c - half, size: half * 2.0 });
+                obstacles.push(Obstacle { min: c - half, max: c + half, low: true });
+                placed += 1;
+            }
+        }
+
         // signs and ads on the back wall
-        let mut signs = Vec::new();
+        let mut wall_signs = Vec::new();
         let mut ads = Vec::new();
         let name_w = font::text_width(def.name) as f32 * 0.25 + 1.2;
         let mut u = 4.0;
         let mut toggle = 0;
         while u + name_w < w as f32 + 2.0 {
             if toggle % 2 == 0 {
-                signs.push(Sign { u0: u, u1: u + name_w, text: def.name.to_string() });
+                wall_signs.push(Sign { u0: u, u1: u + name_w, text: def.name.to_string() });
                 lights.push(LightDef { pos: vec2(u + name_w * 0.5, 1.7), radius: 2.4, color: rgb(255, 255, 245), flicker: 0.0, phase: 0.0, strobe: false });
                 u += name_w + 2.0;
             } else {
@@ -440,7 +614,8 @@ impl Map {
             }
         }
 
-        let (floor, floor_mask, origin) = bake_floor(def, w, h, gw, gh, &tiles, &track_bands, &signs, &ads);
+        let (mut floor, floor_mask, origin) = bake_floor(def, w, h, gw, gh, &tiles, &track_bands, &wall_signs, &ads);
+        paint_details(&mut floor, &floor_mask, origin, def, index, w, h, &tiles, gw, gh, &track_bands, &doors);
         let floor_tex = Texture2D::from_image(&floor);
         floor_tex.set_filter(FilterMode::Nearest);
 
@@ -458,6 +633,8 @@ impl Map {
             tunnel_spawns,
             edge_spawns,
             track_ys,
+            signs,
+            walls_h,
             floor,
             floor_mask,
             floor_tex,
@@ -486,6 +663,11 @@ impl Map {
 
     /// Push a circle out of walls and obstacles.
     pub fn resolve(&self, p: &mut Vec2, r: f32, inner_only: bool) {
+        self.resolve_ex(p, r, inner_only, false);
+    }
+
+    /// `smash_low`: big things (the boss) walk straight through waist-high props.
+    pub fn resolve_ex(&self, p: &mut Vec2, r: f32, inner_only: bool, smash_low: bool) {
         let maxx = if inner_only { self.w as f32 - 0.4 } else { self.gw as f32 - r };
         let maxy = if inner_only { self.h as f32 - 0.4 } else { self.gh as f32 - r };
         p.x = p.x.clamp(1.0 + r, maxx);
@@ -496,6 +678,9 @@ impl Map {
         }
         for &i in &self.obs_grid[(ty * self.gw + tx) as usize] {
             let o = self.obstacles[i as usize];
+            if smash_low && o.low {
+                continue;
+            }
             let c = vec2(p.x.clamp(o.min.x, o.max.x), p.y.clamp(o.min.y, o.max.y));
             let d = *p - c;
             let dist = d.length();
@@ -534,11 +719,24 @@ impl Map {
         }
         for &i in &self.obs_grid[(ty * self.gw + tx) as usize] {
             let o = self.obstacles[i as usize];
-            if p.x >= o.min.x && p.x <= o.max.x && p.y >= o.min.y && p.y <= o.max.y {
+            if !o.low && p.x >= o.min.x && p.x <= o.max.x && p.y >= o.min.y && p.y <= o.max.y {
                 return true;
             }
         }
         false
+    }
+
+    /// Can you step from cell (x, y) by (dx, dy)? Platform screen doors block row crossings.
+    fn crossing_ok(&self, x: i32, y: i32, dx: i32, dy: i32) -> bool {
+        if dy == 0 {
+            return true;
+        }
+        let row = if dy > 0 { y } else { y - 1 };
+        if row < 0 || row >= self.gh {
+            return true;
+        }
+        let wall = |cx: i32| cx >= 0 && cx < self.gw && self.walls_h[(row * self.gw + cx) as usize];
+        !(wall(x) || (dx != 0 && wall(x + dx)))
     }
 
     // ------------------------------------------------------------ flow field
@@ -570,6 +768,9 @@ impl Map {
                 if dx != 0 && dy != 0 && (self.blocked[(y * gw + nx) as usize] || self.blocked[(ny * gw + x) as usize]) {
                     continue;
                 }
+                if !self.crossing_ok(x, y, dx, dy) {
+                    continue;
+                }
                 self.flow[ni] = d + 1;
                 q.push_back((nx, ny));
             }
@@ -596,6 +797,9 @@ impl Map {
             let d = self.flow[(ny * gw + nx) as usize];
             if d < best {
                 if dx != 0 && dy != 0 && (self.blocked[(y * gw + nx) as usize] || self.blocked[(ny * gw + x) as usize]) {
+                    continue;
+                }
+                if !self.crossing_ok(x, y, dx, dy) {
                     continue;
                 }
                 best = d;
@@ -799,8 +1003,6 @@ fn bake_floor(
                         } else if (0.3..0.62).contains(&d) {
                             let bump = (fract(x * 8.0) - 0.5).powi(2) + (fract(y * 8.0) - 0.5).powi(2) < 0.09;
                             if bump { rgb(252, 214, 70) } else { rgb(222, 172, 34) }
-                        } else if (0.85..1.05).contains(&d) && (0.42..0.58).contains(&fract(x / 4.0)) {
-                            rgb(70, 170, 90)
                         } else {
                             let grout = fract(x * 2.0) < 0.05 || fract(y * 2.0) < 0.05;
                             let tile_var = hash2((x * 2.0) as i32, (y * 2.0) as i32, 9) * 0.08;
@@ -921,4 +1123,216 @@ fn wall_col(def: &StationDef, u: f32, z: f32, tracks: &[(i32, i32)], n: f32) -> 
     let ui = (u * 16.0) as i32;
     let grout = ui % 4 == 0 || (z as i32) % 5 == 0;
     shade(shaded, if grout { 0.78 } else { 0.95 + n * 0.06 })
+}
+
+
+// ---------------------------------------------------------------- painted floor details
+
+/// Paint lived-in detail into the baked floor: car-position markers at every door
+/// gap, track numbers, puddles, litter, cracks, old blood trails, dropped clear
+/// umbrellas, and grime along the walls. Deterministic per station.
+#[allow(clippy::too_many_arguments)]
+fn paint_details(img: &mut Image, mask: &[bool], origin: Vec2, def: &StationDef, index: usize, w: i32, h: i32, tiles: &[Tile], gw: i32, gh: i32, tracks: &[(i32, i32)], doors: &[f32]) {
+    let iw = img.width as i32;
+    let ih = img.height as i32;
+    let tile_at = |x: f32, y: f32| -> Tile {
+        let (tx, ty) = (x.floor() as i32, y.floor() as i32);
+        if tx < 1 || ty < 1 {
+            return Tile::Wall;
+        }
+        if tx >= gw || ty >= gh {
+            return Tile::Platform;
+        }
+        tiles[(ty * gw + tx) as usize]
+    };
+    // Paint every floor pixel whose world position falls inside [x0,x1]x[y0,y1].
+    let paint = |img: &mut Image, x0: f32, y0: f32, x1: f32, y1: f32, f: &mut dyn FnMut(f32, f32, Color, i32, i32) -> Option<Color>| {
+        let cs = [iso(x0, y0), iso(x1, y0), iso(x0, y1), iso(x1, y1)];
+        let minx = (cs.iter().map(|c| c.x).fold(f32::MAX, f32::min) - origin.x).floor().max(0.0) as i32;
+        let maxx = (cs.iter().map(|c| c.x).fold(f32::MIN, f32::max) - origin.x).ceil().min(iw as f32 - 1.0) as i32;
+        let miny = (cs.iter().map(|c| c.y).fold(f32::MAX, f32::min) - origin.y).floor().max(0.0) as i32;
+        let maxy = (cs.iter().map(|c| c.y).fold(f32::MIN, f32::max) - origin.y).ceil().min(ih as f32 - 1.0) as i32;
+        for py in miny..=maxy {
+            for px in minx..=maxx {
+                if !mask[(py * iw + px) as usize] {
+                    continue;
+                }
+                let sx = px as f32 + 0.5 + origin.x;
+                let sy = py as f32 + 0.5 + origin.y;
+                let (a, b) = (sx / HALF_W, sy / HALF_H);
+                let (wx, wy) = ((a + b) * 0.5, (b - a) * 0.5);
+                if wx < x0 || wx > x1 || wy < y0 || wy > y1 || wx > w as f32 - 0.1 || wy > h as f32 - 0.1 {
+                    continue;
+                }
+                let t = tile_at(wx, wy);
+                if t != Tile::Platform && t != Tile::Concourse {
+                    continue;
+                }
+                let old = img.get_pixel(px as u32, py as u32);
+                if let Some(c) = f(wx, wy, old, px, py) {
+                    img.set_pixel(px as u32, py as u32, c);
+                }
+            }
+        }
+    };
+    let platform_row = |r: i32| r >= 1 && r < h && tile_at(2.5, r as f32 + 0.5) != Tile::Track;
+    let mut rng = Lcg(0x9e37_79b9 ^ (index as u32 * 7919));
+
+    // grime creeping out from the walls
+    for (x0, y0, x1, y1) in [(1.0, 1.0, w as f32, 2.6), (1.0, 1.0, 2.6, h as f32)] {
+        paint(img, x0, y0, x1, y1, &mut |wx, wy, old, px, py| {
+            let d = (wx - 1.0).min(wy - 1.0);
+            let k = 0.72 + 0.28 * smoothstep(0.0, 1.6, d) + hash2(px / 3, py / 3, 5) * 0.06;
+            Some(shade(old, k.min(1.0)))
+        });
+    }
+
+    // car-position markers at each door gap, numbered like the real ones
+    for (a, b) in tracks {
+        for (k, d) in doors.iter().enumerate() {
+            for (ok, yy) in [(platform_row(a - 1), *a as f32 - 1.25), (platform_row(*b), *b as f32 + 0.75)] {
+                if !ok {
+                    continue;
+                }
+                let x0 = d - 0.28;
+                let digit = std::char::from_digit(((doors.len() - k) % 10) as u32, 10).unwrap_or('0');
+                paint(img, x0, yy, x0 + 0.56, yy + 0.5, &mut |wx, wy, _old, _px, _py| {
+                    let u = ((wx - x0) * 16.0) as i32;
+                    let v = ((wy - yy) * 16.0) as i32;
+                    let border = u == 0 || v == 0 || u >= 8 || v >= 7;
+                    if border {
+                        Some(rgb(236, 236, 228))
+                    } else if (2..7).contains(&u) && font::bit(digit, (u - 2) as usize, (v.clamp(0, 6)) as usize) && v < 7 {
+                        Some(rgb(250, 250, 244))
+                    } else {
+                        Some(rgb(54, 150, 78))
+                    }
+                });
+                // queue lanes either side of the marker
+                for side in [-0.75f32, 0.55] {
+                    let lx = d + side;
+                    paint(img, lx, yy - 0.3, lx + 0.2, yy + 0.8, &mut |wx, _wy, old, _px, _py| {
+                        if ((wx - lx) * 16.0) as i32 % 3 == 0 { Some(mix(old, rgb(230, 230, 222), 0.7)) } else { None }
+                    });
+                }
+            }
+        }
+    }
+
+    // big painted track numbers at the west end of each platform edge
+    for (t, (a, b)) in tracks.iter().enumerate() {
+        let ch = std::char::from_digit(((t + 1) % 10) as u32, 10).unwrap_or('1');
+        for (ok, y0) in [(platform_row(a - 1) && a - 1 > 2, *a as f32 - 3.1), (platform_row(*b) && b + 3 < h, *b as f32 + 1.35)] {
+            if !ok {
+                continue;
+            }
+            let x0 = 2.4;
+            paint(img, x0, y0, x0 + 1.25, y0 + 1.75, &mut |wx, wy, old, px, py| {
+                let gx = ((wx - x0) / 0.25) as usize;
+                let gy = ((wy - y0) / 0.25) as usize;
+                if font::bit(ch, gx, gy) && hash2(px, py, 77) > 0.12 { Some(mix(old, rgb(246, 206, 60), 0.85)) } else { None }
+            });
+        }
+    }
+
+    // puddles from a leaking roof, with glints
+    for _ in 0..(8 + index * 2) {
+        let c = vec2(rng.range(2.5, w as f32 - 1.5), rng.range(1.8, h as f32 - 1.0));
+        let (rx, ry) = (rng.range(0.5, 1.3), rng.range(0.35, 0.9));
+        let ph = rng.range(0.0, 6.0);
+        paint(img, c.x - rx, c.y - ry, c.x + rx, c.y + ry, &mut |wx, wy, old, px, py| {
+            let (dx, dy) = ((wx - c.x) / rx, (wy - c.y) / ry);
+            let d = dx * dx + dy * dy + 0.22 * (dx * 5.0 + ph).sin() * (dy * 4.0).cos();
+            if d >= 1.0 {
+                return None;
+            }
+            let wet = mix(old, rgb(28, 34, 46), 0.55);
+            if hash2(px, py, 21) > 0.985 {
+                Some(mix(wet, rgb(190, 200, 225), 0.7))
+            } else if d > 0.82 {
+                Some(shade(wet, 0.85))
+            } else {
+                Some(wet)
+            }
+        });
+    }
+
+    // litter: papers, flyers and newspapers
+    for _ in 0..(40 + index * 10) {
+        let c = vec2(rng.range(2.0, w as f32 - 1.0), rng.range(1.6, h as f32 - 0.8));
+        let news = rng.f() < 0.35;
+        let (hw, hh): (f32, f32) = if news { (0.28, 0.2) } else { (0.14, 0.1) };
+        let ang = rng.range(0.0, std::f32::consts::PI);
+        let (ca, sa) = (ang.cos(), ang.sin());
+        let tint = if rng.f() < 0.2 { rgb(240, 210, 120) } else { rgb(226, 224, 214) };
+        let r = hw.max(hh) * 1.5;
+        paint(img, c.x - r, c.y - r, c.x + r, c.y + r, &mut |wx, wy, _old, _px, _py| {
+            let (dx, dy) = (wx - c.x, wy - c.y);
+            let (lx, ly) = (dx * ca + dy * sa, -dx * sa + dy * ca);
+            if lx.abs() > hw || ly.abs() > hh {
+                return None;
+            }
+            let line = if news { ((ly + hh) * 40.0) as i32 % 2 == 0 && lx.abs() < hw - 0.03 } else { ((ly + hh) * 30.0) as i32 % 3 == 0 && lx.abs() < hw - 0.04 };
+            Some(if line { rgb(120, 118, 112) } else { tint })
+        });
+    }
+
+    // cracks
+    for _ in 0..(12 + index * 3) {
+        let mut p0 = vec2(rng.range(2.0, w as f32 - 1.0), rng.range(1.6, h as f32 - 0.8));
+        let mut ang = rng.range(0.0, std::f32::consts::TAU);
+        for _ in 0..rng.range(4.0, 10.0) as usize {
+            ang += rng.range(-0.8, 0.8);
+            let p1 = p0 + vec2(ang.cos(), ang.sin()) * rng.range(0.25, 0.55);
+            let (lo, hi) = (p0.min(p1) - 0.05, p0.max(p1) + 0.05);
+            let seg = p1 - p0;
+            paint(img, lo.x, lo.y, hi.x, hi.y, &mut |wx, wy, old, _px, _py| {
+                let q = vec2(wx, wy) - p0;
+                let t = (q.dot(seg) / seg.length_squared()).clamp(0.0, 1.0);
+                if (q - seg * t).length() < 0.03 { Some(shade(old, 0.5)) } else { None }
+            });
+            p0 = p1;
+        }
+    }
+
+    // old blood: pools with drag trails leading away
+    for _ in 0..(3 + index) {
+        let start = vec2(rng.range(3.0, w as f32 - 2.0), rng.range(2.0, h as f32 - 1.5));
+        let dir = vec2(rng.range(-1.0, 1.0), rng.range(-1.0, 1.0)).normalize_or_zero();
+        let len = rng.range(1.5, 3.5);
+        let mut blobs = vec![(start, 0.55)];
+        let mut t = 0.3;
+        while t < len {
+            blobs.push((start + dir * t + vec2(dir.y, -dir.x) * (t * 3.0).sin() * 0.06, 0.2 * (1.0 - t / len) + 0.06));
+            t += 0.12;
+        }
+        for (c, r) in blobs {
+            paint(img, c.x - r, c.y - r, c.x + r, c.y + r, &mut |wx, wy, old, px, py| {
+                let d = vec2(wx - c.x, wy - c.y).length() / r;
+                if d < 1.0 - hash2(px, py, 9) * 0.3 { Some(mix(old, rgb(70, 16, 12), 0.75)) } else { None }
+            });
+        }
+    }
+
+    // dropped clear vinyl umbrellas, the most Tokyo object there is
+    for _ in 0..(4 + index) {
+        let c = vec2(rng.range(2.5, w as f32 - 1.5), rng.range(1.8, h as f32 - 1.0));
+        let ang = rng.range(0.0, std::f32::consts::TAU);
+        let hd = vec2(ang.cos(), ang.sin());
+        paint(img, c.x - 0.9, c.y - 0.9, c.x + 0.9, c.y + 0.9, &mut |wx, wy, old, _px, _py| {
+            let q = vec2(wx - c.x, wy - c.y);
+            let d = q.length();
+            if d < 0.42 {
+                let a = q.y.atan2(q.x);
+                let rib = ((a / std::f32::consts::TAU * 8.0).fract() < 0.08) || d > 0.39;
+                Some(if rib { mix(old, rgb(235, 240, 245), 0.75) } else { mix(old, rgb(220, 232, 240), 0.32) })
+            } else {
+                // the handle
+                let t = q.dot(hd);
+                let off = (q - hd * t).length();
+                if t > 0.3 && t < 0.85 && off < 0.03 { Some(rgb(40, 40, 44)) } else { None }
+            }
+        });
+    }
+    let _ = def;
 }

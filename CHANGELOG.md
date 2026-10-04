@@ -3,6 +3,33 @@
 Every version is one build sprint. Newest first. Versions are tagged in git, and
 each tag publishes a GitHub Release with downloads.
 
+## [0.4.0] - 2026-10-04 - Living stations
+
+### Added
+- Platform screen doors along every platform edge, the waist-high kind on the
+  Yamanote line. Gaps sit exactly where the train doors stop, so the horde has to
+  funnel through them; bullets fly over the panels and the boss smashes through.
+  The flow field now understands walls between cells, not just blocked cells.
+- Hanging signs over the platforms: station name boards and blinking amber LED
+  departure boards ("FOR UENO / LAST TRAIN 00:12"). They fade when you walk behind.
+- Painted floor detail baked into each station: numbered car-position markers at
+  every door gap, big track numbers, puddles with glints, newspapers and flyers,
+  cracks, old blood drag trails, dropped clear vinyl umbrellas, grime along walls.
+- Clutter: a lit kiosk, abandoned suitcases, stacked boxes, construction barriers.
+- Atmosphere: drifting mist that glows near lamps (anchored to the world, not the
+  screen), failing tubes that spit sparks with an electric crackle, and stale air
+  drifting out of the tunnels.
+- Crows that peck around the platforms, scatter cawing when you get close or start
+  shooting, and glide back down to the dead later.
+- New synthesized sounds: crow caws and electrical zaps.
+- Tilt-shift toggle: T on keyboard, Y on a controller. It stays on by default; the
+  pause screen shows the current settings.
+
+### Changed
+- Benches, ticket gates, bins and other waist-high props no longer block bullets.
+- Tall props (pillars, signs, vending machines, the kiosk) all fade when they hide
+  the player, not just pillars.
+
 ## [0.3.0] - 2026-10-04 - Controllers
 
 ### Added

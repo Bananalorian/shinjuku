@@ -48,6 +48,8 @@ fn mix(id: Id) -> (f32, f64) {
         Id::GameOver => (0.7, 1.0),
         Id::Victory => (0.7, 1.0),
         Id::Select => (0.4, 0.05),
+        Id::Caw => (0.45, 0.6),
+        Id::Zap => (0.35, 0.3),
         _ => (1.0, 0.0),
     }
 }
@@ -118,6 +120,8 @@ impl Audio {
                 Sfx::Train => self.play(Id::Train, 1.0),
                 Sfx::Chime => self.play(Id::Chime, 1.0),
                 Sfx::Clear => self.play(Id::Clear, 1.0),
+                Sfx::Caw(p) => self.play(Id::Caw, Self::falloff(world, p)),
+                Sfx::Zap(p) => self.play(Id::Zap, Self::falloff(world, p)),
             }
         }
     }

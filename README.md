@@ -15,6 +15,12 @@ the station floors and walls, all the lighting, and every sound effect and music
 loop are built when the game starts. Written in Rust on
 [macroquad](https://macroquad.rs).
 
+The stations are meant to feel lived-in, then abandoned: waist-high platform screen
+doors with gaps at the train doors, hanging LED departure boards, numbered car
+markers painted at every door, dropped clear umbrellas, puddles, newspapers, a lit
+kiosk, flickering tubes that spit sparks, mist drifting through the lamplight, and
+crows picking at whatever the horde left behind.
+
 | | |
 |---|---|
 | ![Akihabara](docs/screenshots/akihabara.png) | ![The train arriving at Ueno](docs/screenshots/train.png) |
@@ -40,6 +46,7 @@ loop are built when the game starts. Written in Rust on
 | Dash | Space / Shift | A or LB | DASH button |
 | Grenade | right click / E / Q | RB or B | NADE button |
 | Pause | Esc / P | Start | |
+| Tilt-shift on/off | T | Y | |
 | Mute | M | Back / View | |
 | Menus | arrows + Enter, or click | d-pad + A | tap |
 
@@ -142,8 +149,11 @@ SJ_SHOTS=60,300 SJ_STATION=1 SJ_SCENE=train SJ_AUTO=1 cargo run --release
 ```
 
 Renders scripted frames to `/tmp/sj_<frame>.png` and quits. `SJ_SCENE` can be
-`train`, `boss`, `bossnear`, `win`, `dead`, `upgrade`, or `wall`. `SJ_SIZE=844x390`
-simulates a phone screen. `SJ_AUTO=1` turns on an autopilot that wanders and shoots.
+`train`, `boss`, `bossnear`, `win`, `dead`, `upgrade`, `wall`, `crows`, or
+`pos:X,Y` to drop the player at a spot. `SJ_SIZE=844x390` simulates a phone
+screen, `SJ_NOTILT=1` starts with tilt-shift off, `SJ_AUTO=1` turns on an autopilot
+that wanders and shoots, and `SJ_STATS=1` prints horde stats when it quits (handy
+for checking zombies aren't getting stuck).
 
 ## Not in yet
 

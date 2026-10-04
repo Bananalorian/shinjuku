@@ -53,6 +53,7 @@ struct Game {
     fade: f32,
     paused: bool,
     up_sel: usize,
+    toast: Option<(String, f32)>,
 }
 
 impl Game {
@@ -72,6 +73,7 @@ impl Game {
             fade: 1.0,
             paused: false,
             up_sel: 0,
+            toast: None,
             world,
             art,
             audio,
@@ -150,6 +152,11 @@ impl Game {
         if ui.mute {
             self.audio.toggle_mute();
         }
+        if ui.tilt {
+            self.fx.tilt_shift = !self.fx.tilt_shift;
+            let s = if self.fx.tilt_shift { "TILT-SHIFT ON" } else { "TILT-SHIFT OFF" };
+            self.toast = Some((s.to_string(), 1.8));
+        }
         let mode = self.input.mode;
         let loops: &[(Id, f32)] = match self.scene {
             Scene::Title => &[(Id::Ambient, 0.5), (Id::Hum, 0.12)],
@@ -197,7 +204,7 @@ impl Game {
                 self.fx.render(&self.world, &self.art, 1.35);
                 hud::draw_hud(&self.world, &self.art, u, &self.defs, &self.input);
                 if self.paused {
-                    hud::draw_pause(&self.art, u, mode);
+                    hud::draw_pause(&self.art, u, mode, self.fx.tilt_shift, self.audio.muted);
                 }
                 let events: Vec<Event> = self.world.events.drain(..).collect();
                 for e in events {
@@ -302,6 +309,15 @@ impl Game {
                 }
             }
         }
+        if let Some((msg, t)) = &mut self.toast {
+            *t -= dt;
+            let u = self.fx.scale;
+            let a = t.min(1.0).max(0.0);
+            hud::text_c(&self.art, msg, screen_width() * 0.5, screen_height() * 0.16, u, with_alpha(hud::CREAM, a));
+            if *t <= 0.0 {
+                self.toast = None;
+            }
+        }
         if self.input.pad_toast > 0.0 {
             let u = self.fx.scale;
             let a = self.input.pad_toast.min(1.0);
@@ -367,6 +383,15 @@ fn debug_cfg() -> Option<Debug> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn env_flag(name: &str) -> bool {
+    std::env::var(name).is_ok()
+}
+#[cfg(target_arch = "wasm32")]
+fn env_flag(_name: &str) -> bool {
+    false
+}
+
 #[macroquad::main(window_conf)]
 async fn main() {
     rand::srand((miniquad::date::now() * 1000.0) as u64);
@@ -389,6 +414,9 @@ async fn main() {
     next_frame().await;
     let audio = Audio::load().await;
     let mut game = Game::new(audio);
+    if env_flag("SJ_NOTILT") {
+        game.fx.tilt_shift = false;
+    }
     if let Some(d) = &dbg {
         rand::srand(7);
         if let Some(s) = d.station {
@@ -405,6 +433,22 @@ async fn main() {
                     for k in 0..6 {
                         let p = game.world.player.pos + vec2(1.0 + k as f32 * 0.3, 0.5);
                         game.world.add_zombie(ZKind::Walker, p);
+                    }
+                }
+                pos if pos.starts_with("pos:") => {
+                    let v: Vec<f32> = pos[4..].split(',').filter_map(|n| n.parse().ok()).collect();
+                    if v.len() == 2 {
+                        game.world.player.pos = vec2(v[0], v[1]);
+                        game.world.cam = iso(v[0], v[1]);
+                        game.world.msg = None;
+                    }
+                }
+                "crows" => {
+                    let p = game.world.player.pos;
+                    game.world.msg = None;
+                    for (k, b) in game.world.birds.iter_mut().enumerate().take(4) {
+                        b.pos = p + vec2(3.4 + k as f32 * 0.5, -0.4 + k as f32 * 0.45);
+                        b.flying = false;
                     }
                 }
                 "wall" => {
@@ -464,6 +508,15 @@ async fn main() {
                 get_screen_data().export_png(&format!("/tmp/sj_{}.png", frame));
             }
             if frame >= *d.shots.iter().max().unwrap_or(&1) {
+                if env_flag("SJ_STATS") {
+                    let w = &game.world;
+                    let on_track = w.zombies.iter().filter(|z| w.map.tile(z.pos.x, z.pos.y) == level::Tile::Track).count();
+                    let slow = w.zombies.iter().filter(|z| z.vel.length() < 0.3 && z.age > 3.0).count();
+                    println!("kills {} alive {} on_track {} slow {} hp {:.0}", w.kills, w.zombies.len(), on_track, slow, w.player.hp);
+                    let ground = w.birds.iter().filter(|b| !b.flying).count();
+                    let near: Vec<String> = w.birds.iter().map(|b| format!("({:.1},{:.1} z{:.0})", b.pos.x - w.player.pos.x, b.pos.y - w.player.pos.y, b.z)).collect();
+                    println!("birds {} on ground {} rel {:?}", w.birds.len(), ground, near);
+                }
                 break;
             }
         }

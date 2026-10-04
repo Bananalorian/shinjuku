@@ -38,6 +38,7 @@ pub struct Ui {
     pub nav: IVec2,
     pub pause: bool,
     pub mute: bool,
+    pub tilt: bool,
 }
 
 pub struct Input {
@@ -190,6 +191,7 @@ impl Input {
             ui.confirm |= p.pressed(pad::A);
             ui.pause |= p.pressed(pad::START);
             ui.mute |= p.pressed(pad::BACK);
+            ui.tilt |= p.pressed(pad::Y);
             ui.nav += p.nav();
         }
 
@@ -249,6 +251,9 @@ impl Input {
         }
         if is_key_pressed(KeyCode::M) {
             ui.mute = true;
+        }
+        if is_key_pressed(KeyCode::T) {
+            ui.tilt = true;
         }
         if is_key_pressed(KeyCode::Left) { ui.nav.x -= 1; }
         if is_key_pressed(KeyCode::Right) { ui.nav.x += 1; }

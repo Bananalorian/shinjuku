@@ -46,6 +46,19 @@ pub struct Art {
     pub onigiri: Spr,
     pub grenade: Rect,
     pub casing: Rect,
+    pub psd: [Spr; 2],
+    pub suitcases: Vec<Spr>,
+    pub boxes: Spr,
+    pub kiosk: Spr,
+    pub barrier: Spr,
+    pub crow: [Spr; 4], // stand, peck, wings up, wings down
+}
+
+/// Station-specific hanging signs, built per map (they carry the station's name).
+pub struct SignArt {
+    pub tex: Texture2D,
+    pub name: Spr,
+    pub led: [Spr; 2], // two frames so the LED board can blink
 }
 
 // ---------------------------------------------------------------- atlas packing
@@ -55,20 +68,24 @@ struct Packer {
     x: u32,
     y: u32,
     row_h: u32,
+    size: u32,
 }
 
 impl Packer {
     fn new() -> Self {
-        Packer { img: Image::gen_image_color(ATLAS as u16, ATLAS as u16, Color::new(0., 0., 0., 0.)), x: 1, y: 1, row_h: 0 }
+        Self::new_sized(ATLAS)
+    }
+    fn new_sized(size: u32) -> Self {
+        Packer { img: Image::gen_image_color(size as u16, size as u16, Color::new(0., 0., 0., 0.)), x: 1, y: 1, row_h: 0, size }
     }
     fn add(&mut self, src: &Image) -> Rect {
         let (w, h) = (src.width as u32, src.height as u32);
-        if self.x + w + 2 > ATLAS {
+        if self.x + w + 2 > self.size {
             self.x = 1;
             self.y += self.row_h + 2;
             self.row_h = 0;
         }
-        assert!(self.y + h < ATLAS, "atlas full");
+        assert!(self.y + h < self.size, "atlas full");
         for yy in 0..h {
             for xx in 0..w {
                 let c = src.get_pixel(xx, yy);
@@ -741,6 +758,251 @@ fn make_train(kind: Slice) -> (Image, Vec2) {
     })
 }
 
+fn make_psd(sticker: bool) -> (Image, Vec2) {
+    // waist-high platform screen door panel, half a tile long
+    let panel = rgb(214, 218, 222);
+    let green = rgb(110, 178, 46);
+    let (img, a) = iso_box(0.5, 0.16, 15.0, |f, u, v| {
+        let k = face_k(f);
+        let c = match f {
+            Face::Top => rgb(96, 100, 108),
+            _ => {
+                if v < 1.5 {
+                    rgb(50, 52, 58)
+                } else if v > 13.0 {
+                    rgb(120, 124, 132)
+                } else if (10.5..12.0).contains(&v) {
+                    green
+                } else if f == Face::Left && ((u * 16.0) as i32 == 0) {
+                    rgb(150, 154, 160)
+                } else if sticker && f == Face::Left && (4.0..7.0).contains(&v) && (0.18..0.32).contains(&u) {
+                    rgb(240, 196, 40) // "do not lean" sticker
+                } else {
+                    panel
+                }
+            }
+        };
+        Some(shade(c, k))
+    });
+    (outline_image(&img), a)
+}
+
+fn make_suitcase(body: Color, lying: bool) -> (Image, Vec2) {
+    let (fx, fy, h) = if lying { (0.45, 0.3, 5.0) } else { (0.3, 0.18, 11.0) };
+    let (img, a) = iso_box(fx, fy, h, |f, u, v| {
+        let k = face_k(f);
+        let ridge = if lying { ((u * 16.0) as i32) % 3 == 0 } else { (v as i32) % 3 == 0 };
+        let c = match f {
+            Face::Top => {
+                if !lying && (0.35..0.65).contains(&(u / fx)) {
+                    rgb(40, 40, 44) // handle
+                } else {
+                    shade(body, 1.1)
+                }
+            }
+            _ => if ridge { shade(body, 0.8) } else { body },
+        };
+        Some(shade(c, k))
+    });
+    (outline_image(&img), a)
+}
+
+fn make_boxes() -> (Image, Vec2) {
+    let card = rgb(176, 136, 86);
+    let (img, a) = iso_box(0.6, 0.5, 14.0, |f, u, v| {
+        let k = face_k(f);
+        let c = match f {
+            Face::Top => if (0.27..0.33).contains(&u) { rgb(196, 170, 120) } else { shade(card, 1.08) },
+            _ => {
+                if (6.5..7.5).contains(&v) {
+                    shade(card, 0.6) // two boxes stacked
+                } else if (0.27..0.33).contains(&u) && v > 11.0 {
+                    rgb(196, 170, 120) // tape
+                } else {
+                    card
+                }
+            }
+        };
+        Some(shade(c, k))
+    });
+    (outline_image(&img), a)
+}
+
+fn make_kiosk() -> (Image, Vec2) {
+    let body = rgb(46, 120, 74);
+    let fx = 2.2;
+    let (img, a) = iso_box(fx, 1.0, 26.0, |f, u, v| {
+        let k = face_k(f);
+        let c = match f {
+            Face::Top => shade(body, 0.7),
+            Face::Right => if v > 20.0 { rgb(250, 250, 240) } else { body },
+            Face::Left => {
+                let ui = (u * 16.0) as i32;
+                if v > 22.0 {
+                    // lit sign band with the word KIOSK
+                    let fxp = ((u - 0.6) * 16.0).floor();
+                    let fyp = (25.5 - v).floor();
+                    let lit = fxp >= 0.0 && fyp >= 0.0 && {
+                        let n = fxp as usize;
+                        let ch = "KIOSK".chars().nth(n / 6);
+                        ch.map_or(false, |c| font::bit(c, n % 6, fyp as usize))
+                    };
+                    if lit { rgb(30, 60, 40) } else { rgb(255, 250, 225) }
+                } else if (11.0..21.0).contains(&v) && (0.1..fx - 0.1).contains(&u) {
+                    // shelves of snacks and magazines
+                    if (v as i32) % 4 == 0 {
+                        rgb(120, 110, 100)
+                    } else {
+                        let pal = [rgb(230, 70, 60), rgb(250, 200, 60), rgb(80, 140, 230), rgb(240, 240, 235), rgb(90, 200, 120)];
+                        pal[(hash2(ui, v as i32 / 4, 31) * 5.0) as usize % 5]
+                    }
+                } else if (8.0..11.0).contains(&v) {
+                    rgb(200, 200, 205) // counter
+                } else {
+                    body
+                }
+            }
+        };
+        Some(shade(c, if f == Face::Left && v > 8.0 { 1.0 } else { k }))
+    });
+    (outline_image(&img), a)
+}
+
+fn make_barrier() -> (Image, Vec2) {
+    let (img, a) = iso_box(1.0, 0.14, 10.0, |f, u, v| {
+        let k = face_k(f);
+        if f == Face::Left && !(u < 0.08 || u > 0.92) && !(4.0..9.0).contains(&v) {
+            return None; // open frame below the striped board
+        }
+        let stripe = (((u * 16.0) as i32 + v as i32) / 3) % 2 == 0;
+        let c = if (4.0..9.0).contains(&v) || f == Face::Top {
+            if stripe { rgb(240, 200, 30) } else { rgb(30, 30, 30) }
+        } else {
+            rgb(200, 200, 200)
+        };
+        Some(shade(c, k))
+    });
+    (outline_image(&img), a)
+}
+
+fn make_crow(frame: usize) -> Cv {
+    let mut c = Cv::new(9, 7);
+    let k = rgb(18, 18, 24);
+    let hi = rgb(46, 52, 80);
+    match frame {
+        0 | 1 => {
+            c.rect(2, 3, 5, 2, k); // body
+            c.rect(3, 3, 3, 1, hi);
+            c.rect(0, 4, 2, 1, k); // tail
+            c.set(3, 5, rgb(60, 60, 64));
+            c.set(5, 5, rgb(60, 60, 64)); // legs
+            if frame == 0 {
+                c.rect(6, 1, 2, 2, k); // head up
+                c.set(8, 2, rgb(70, 70, 70));
+                c.set(7, 1, rgb(200, 200, 200));
+            } else {
+                c.rect(6, 4, 2, 2, k); // head down, pecking
+                c.set(8, 5, rgb(70, 70, 70));
+            }
+        }
+        _ => {
+            c.rect(2, 3, 5, 2, k);
+            c.rect(6, 2, 2, 2, k);
+            c.set(8, 3, rgb(70, 70, 70));
+            c.rect(0, 3, 2, 1, k);
+            if frame == 2 {
+                c.rect(3, 0, 1, 3, k);
+                c.rect(4, 1, 2, 2, hi);
+            } else {
+                c.rect(3, 5, 3, 2, k);
+            }
+        }
+    }
+    c
+}
+
+/// Hanging signs for one station: a name board and a blinking LED departure board.
+pub fn build_signs(name: &str, l1: &str) -> SignArt {
+    let mut p = Packer::new_sized(512);
+    let green = rgb(110, 178, 46);
+    let text_at = |text: &str, u: f32, z: f32, u0: f32, ztop: f32| -> bool {
+        let fx = ((u - u0) * 16.0).floor();
+        let fy = (ztop - z).floor();
+        if fx < 0.0 || fy < 0.0 {
+            return false;
+        }
+        let n = fx as usize;
+        text.chars().nth(n / 6).map_or(false, |c| font::bit(c, n % 6, fy as usize))
+    };
+    let rods = |u: f32, fx: f32, v: f32, top: f32| v > top && v < 74.0 && ((0.12..0.18).contains(&u) || (fx - 0.18..fx - 0.12).contains(&u));
+
+    // station name board
+    let nw = font::text_width(name) as f32 / 16.0 + 0.7;
+    let (img, a) = iso_box(nw, 0.12, 74.0, |f, u, v| {
+        if rods(u, nw, v, 60.0) {
+            return Some(rgb(70, 70, 76));
+        }
+        if !(46.0..=60.0).contains(&v) && f != Face::Top {
+            return None;
+        }
+        Some(match f {
+            Face::Top => {
+                if v > 0.0 { return None; } // the box top sits at the ceiling; hide it
+                rgb(40, 40, 46)
+            }
+            Face::Right => rgb(60, 60, 66),
+            Face::Left => {
+                if v < 48.0 {
+                    green
+                } else if v > 59.0 || u < 0.06 || u > nw - 0.06 {
+                    rgb(40, 40, 46)
+                } else if text_at(name, u, v, 0.35, 57.5) {
+                    rgb(24, 24, 30)
+                } else {
+                    rgb(246, 246, 240)
+                }
+            }
+        })
+    });
+    let name_spr = Spr { r: p.add(&outline_image(&img)), anchor: a };
+
+    // LED departure board (two frames: second line blinks)
+    let l2 = "LAST TRAIN 00:12";
+    let lw = (font::text_width(l1).max(font::text_width(l2)) as f32) / 16.0 + 0.7;
+    let mut led = [name_spr, name_spr];
+    for frame in 0..2 {
+        let (img, a) = iso_box(lw, 0.12, 74.0, |f, u, v| {
+            if rods(u, lw, v, 62.0) {
+                return Some(rgb(70, 70, 76));
+            }
+            if !(44.0..=62.0).contains(&v) {
+                return None;
+            }
+            Some(match f {
+                Face::Top => return None,
+                Face::Right => rgb(40, 40, 46),
+                Face::Left => {
+                    if v > 61.0 || v < 45.0 || u < 0.06 || u > lw - 0.06 {
+                        rgb(56, 56, 62)
+                    } else if text_at(l1, u, v, 0.35, 59.5) {
+                        rgb(255, 170, 40)
+                    } else if frame == 0 && text_at(l2, u, v, 0.35, 51.5) {
+                        rgb(255, 120, 30)
+                    } else if ((u * 16.0) as i32 + v as i32) % 2 == 0 {
+                        rgb(14, 12, 10)
+                    } else {
+                        rgb(26, 20, 16)
+                    }
+                }
+            })
+        });
+        led[frame] = Spr { r: p.add(&outline_image(&img)), anchor: a };
+    }
+    let tex = Texture2D::from_image(&p.img);
+    tex.set_filter(FilterMode::Nearest);
+    SignArt { tex, name: name_spr, led }
+}
+
 // ---------------------------------------------------------------- build everything
 
 impl Art {
@@ -896,10 +1158,31 @@ impl Art {
         cs.set_pixel(1, 0, rgb(150, 110, 40));
         let casing = p.add(&cs);
 
+        let psd = [false, true].map(|st| { let (i, a) = make_psd(st); Spr { r: p.add(&i), anchor: a } });
+        let suitcases = [(rgb(200, 40, 50), false), (rgb(40, 60, 120), false), (rgb(190, 194, 200), false), (rgb(60, 60, 64), true)]
+            .iter()
+            .map(|(c, lying)| { let (i, a) = make_suitcase(*c, *lying); Spr { r: p.add(&i), anchor: a } })
+            .collect();
+        let boxes = { let (i, a) = make_boxes(); Spr { r: p.add(&i), anchor: a } };
+        let kiosk = { let (i, a) = make_kiosk(); Spr { r: p.add(&i), anchor: a } };
+        let barrier = { let (i, a) = make_barrier(); Spr { r: p.add(&i), anchor: a } };
+        let mut crow = [Spr { r: Rect::default(), anchor: Vec2::ZERO }; 4];
+        for (f, slot) in crow.iter_mut().enumerate() {
+            let cv = make_crow(f);
+            let (img, _) = cv.finish();
+            *slot = Spr { r: p.add(&img), anchor: vec2(5.0, 7.0) };
+        }
+
         let tex = Texture2D::from_image(&p.img);
         tex.set_filter(FilterMode::Nearest);
 
         Art {
+            psd,
+            suitcases,
+            boxes,
+            kiosk,
+            barrier,
+            crow,
             tex,
             white,
             soft,

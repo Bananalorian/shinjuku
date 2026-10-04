@@ -53,6 +53,16 @@ uniform float Focus;         // tilt-shift focus line (0..1 down the screen)
 uniform vec4 Shock;          // xy center, z radius, w strength
 uniform vec4 Fx;             // x hurt, y flash, z saturation, w tilt-shift radius
 uniform vec3 Fog;
+uniform vec2 Cam;            // camera offset, keeps the mist anchored to the world
+uniform float Mist;          // drifting mist amount
+
+float h21(vec2 q) { return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 q) {
+    vec2 i = floor(q);
+    vec2 f = fract(q);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(h21(i), h21(i + vec2(1.0, 0.0)), f.x), mix(h21(i + vec2(0.0, 1.0)), h21(i + vec2(1.0, 1.0)), f.x), f.y);
+}
 
 float bayer2(vec2 a) { a = floor(a); return fract(a.x / 2.0 + a.y * a.y * 0.75); }
 float bayer4(vec2 a) { return bayer2(0.5 * a) * 0.25 + bayer2(a); }
@@ -102,6 +112,12 @@ void main() {
     }
     col += bloom * 0.3;
 
+    // drifting mist, lit by whatever lamps are nearby
+    vec2 wp = px + Cam;
+    float fg = vnoise(wp * 0.018 + vec2(Time * 0.15, Time * 0.05)) * 0.65 + vnoise(wp * 0.045 - vec2(Time * 0.22, 0.0)) * 0.35;
+    fg = smoothstep(0.48, 0.95, fg) * Mist;
+    col += fg * (Fog * 0.7 + texture2D(LightTex, p).rgb * 0.45);
+
     // haze in the distance (top of the screen)
     float far = smoothstep(0.5, 0.0, p.y);
     col = mix(col, Fog, far * 0.3);
@@ -127,6 +143,8 @@ void main() {
 "#;
 
 pub struct Fx {
+    /// Miniature-style depth-of-field. Toggle with T (keyboard) or Y (controller).
+    pub tilt_shift: bool,
     pub vw: u32,
     pub vh: u32,
     pub scale: f32,
@@ -175,6 +193,8 @@ impl Fx {
                     UniformDesc::new("Shock", UniformType::Float4),
                     UniformDesc::new("Fx", UniformType::Float4),
                     UniformDesc::new("Fog", UniformType::Float3),
+                    UniformDesc::new("Cam", UniformType::Float2),
+                    UniformDesc::new("Mist", UniformType::Float1),
                 ],
                 textures: vec!["LightTex".to_string()],
                 ..Default::default()
@@ -183,6 +203,7 @@ impl Fx {
         .expect("post shader");
         let (vw, vh, scale) = Self::dims();
         Fx {
+            tilt_shift: true,
             vw,
             vh,
             scale,
@@ -264,9 +285,12 @@ impl Fx {
         self.post.set_uniform("Time", w.time);
         self.post.set_uniform("Focus", focus);
         self.post.set_uniform("Shock", vec4(sc.x, sc.y, sr, ss));
-        self.post.set_uniform("Fx", vec4(w.hurt * 0.8 + low_hp, w.flash, saturation, 3.4));
+        let tilt = if self.tilt_shift { 3.4 } else { 0.0 };
+        self.post.set_uniform("Fx", vec4(w.hurt * 0.8 + low_hp, w.flash, saturation, tilt));
         let fog = w.ambient;
         self.post.set_uniform("Fog", vec3(fog.r * 0.7, fog.g * 0.7, fog.b * 0.9));
+        self.post.set_uniform("Cam", tl);
+        self.post.set_uniform("Mist", 0.2f32);
         self.post.set_texture("LightTex", self.light.texture.clone());
         gl_use_material(&self.post);
         draw_texture_ex(&self.scene.texture, 0.0, 0.0, WHITE, DrawTextureParams { dest_size: Some(vec2(vw as f32, vh as f32)), ..Default::default() });
@@ -324,6 +348,7 @@ enum Item {
     Grenade(usize),
     Slice(usize),
     Ghost(usize),
+    Bird(usize),
 }
 
 fn draw_sorted(w: &World, art: &Art, view: Rect) {
@@ -352,6 +377,11 @@ fn draw_sorted(w: &World, art: &Art, view: Rect) {
     for (i, g) in w.ghosts.iter().enumerate() {
         items.push((g.pos.x + g.pos.y - 0.01, Item::Ghost(i)));
     }
+    for (i, b) in w.birds.iter().enumerate() {
+        if inview(b.pos) {
+            items.push((b.pos.x + b.pos.y + b.z * 0.01, Item::Bird(i)));
+        }
+    }
     if let Some(t) = &w.train {
         for i in 0..t.slices.len() {
             let x = t.slice_x(i);
@@ -368,22 +398,37 @@ fn draw_sorted(w: &World, art: &Art, view: Rect) {
         match it {
             Item::Prop(i) => {
                 let pr = &w.map.props[i];
-                let s = match pr.kind {
-                    PropKind::Pillar => &art.pillar,
-                    PropKind::Vending(v) => &art.vending[v],
-                    PropKind::Bench => &art.bench,
-                    PropKind::Gate => &art.gate,
-                    PropKind::Bin => &art.bin,
+                let blink = ((w.time * 1.4) as i32 % 2) as usize;
+                let (tex, s) = match pr.kind {
+                    PropKind::Pillar => (&art.tex, &art.pillar),
+                    PropKind::Vending(v) => (&art.tex, &art.vending[v]),
+                    PropKind::Bench => (&art.tex, &art.bench),
+                    PropKind::Gate => (&art.tex, &art.gate),
+                    PropKind::Bin => (&art.tex, &art.bin),
+                    PropKind::Psd => (&art.tex, &art.psd[((pr.pos.x * 2.0) as i32 % 5 == 2) as usize]),
+                    PropKind::Kiosk => (&art.tex, &art.kiosk),
+                    PropKind::Suitcase(v) => (&art.tex, &art.suitcases[v.min(art.suitcases.len() - 1)]),
+                    PropKind::Boxes => (&art.tex, &art.boxes),
+                    PropKind::Barrier => (&art.tex, &art.barrier),
+                    PropKind::SignName => (&w.map.signs.tex, &w.map.signs.name),
+                    PropKind::SignLed => (&w.map.signs.tex, &w.map.signs.led[blink]),
                 };
                 let at = iso(pr.pos.x, pr.pos.y);
                 let mut col = WHITE;
-                if pr.kind == PropKind::Pillar && depth > pdepth && !w.demo {
+                // tall things fade out when you walk behind them
+                if pr.kind.occludes() && depth > pdepth && !w.demo {
                     let r = Rect::new(at.x - s.anchor.x - 2.0, at.y - s.anchor.y, s.r.w + 4.0, s.r.h);
                     if r.contains(pscreen) {
                         col = Color::new(1.0, 1.0, 1.0, 0.35);
                     }
                 }
-                spr(art, s, at, false, col);
+                draw_texture_ex(
+                    tex,
+                    (at.x - s.anchor.x).round(),
+                    (at.y - s.anchor.y).round(),
+                    col,
+                    DrawTextureParams { source: Some(s.r), ..Default::default() },
+                );
             }
             Item::Zombie(i) => draw_zombie(w, art, &w.zombies[i]),
             Item::Player => draw_player(w, art),
@@ -408,6 +453,15 @@ fn draw_sorted(w: &World, art: &Art, view: Rect) {
                 let view = if g.back { 1 } else { 0 };
                 let a = (g.life / 0.25) * 0.55;
                 spr(art, &art.player.flash[view][g.frame], iso3(g.pos.x, g.pos.y, gz), g.face_left, Color::new(0.3, 0.9, 1.0, a));
+            }
+            Item::Bird(i) => {
+                let b = &w.birds[i];
+                let gz = w.map.ground_z(b.pos);
+                if b.z < 40.0 {
+                    shadow(art, iso3(b.pos.x, b.pos.y, gz), 0.45 * (1.0 - b.z / 40.0) + 0.1);
+                }
+                let frame = if b.flying { 2 + (b.anim as usize % 2) } else if (b.t * 1.7).fract() > 0.72 { 1 } else { 0 };
+                spr(art, &art.crow[frame], iso3(b.pos.x, b.pos.y, gz + b.z), b.face_left, WHITE);
             }
             Item::Slice(i) => {
                 let t = w.train.as_ref().unwrap();

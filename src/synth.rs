@@ -354,6 +354,42 @@ pub fn roar(seed: u32) -> Vec<f32> {
     b
 }
 
+pub fn caw(seed: u32, double: bool) -> Vec<f32> {
+    let one = vocal(seed, 0.3, 560.0, 450.0, (26.0, 0.035), 1300.0, 2500.0, 0.8, 3.4);
+    let mut b = buf(if double { 0.75 } else { 0.4 });
+    for (i, x) in one.iter().enumerate() {
+        b[i] += x;
+        if double {
+            let j = i + (0.38 * SR) as usize;
+            if j < b.len() {
+                b[j] += x * 0.85;
+            }
+        }
+    }
+    let mut b = reverb(&b, 0.25, 1.3, 0.55);
+    normalize(&mut b, 0.8);
+    b
+}
+
+pub fn zap(seed: u32) -> Vec<f32> {
+    let mut b = buf(0.35);
+    let mut r = Rng::new(seed);
+    let mut bp = Bq::default();
+    let mut gate = 1.0f32;
+    for (i, s) in b.iter_mut().enumerate() {
+        let t = i as f32 / SR;
+        if i % 400 == 0 {
+            gate = if r.noise() > -0.2 { 1.0 } else { 0.15 };
+        }
+        let crackle = bp.bandpass(r.noise(), 3200.0, 1.2) * gate * 2.0;
+        let buzz = sq(100.0 * t, 0.5) * 0.25 + (TAU * 200.0 * t).sin() * 0.2;
+        *s = (crackle + buzz) * (-t * 9.0).exp();
+    }
+    drive(&mut b, 1.6);
+    normalize(&mut b, 0.7);
+    b
+}
+
 // ---------------------------------------------------------------- tones, bells, jingles
 
 /// FM bell: `ratio` sets how metallic it is.
@@ -744,6 +780,8 @@ pub enum Id {
     GameOver,
     Victory,
     Select,
+    Caw,
+    Zap,
     Hum,
     Music,
     Ambient,
@@ -793,6 +831,10 @@ pub fn bank() -> Vec<(Id, Vec<u8>)> {
     v.push((Id::GameOver, mono(game_over())));
     v.push((Id::Victory, mono(victory())));
     v.push((Id::Select, mono(select())));
+    v.push((Id::Caw, mono(caw(1400, false))));
+    v.push((Id::Caw, mono(caw(1401, true))));
+    v.push((Id::Zap, mono(zap(1500))));
+    v.push((Id::Zap, mono(zap(1501))));
     v.push((Id::Hum, mono(hum())));
     let (l, r) = combat_music();
     v.push((Id::Music, wav(&interleave(&l, &r), 2)));

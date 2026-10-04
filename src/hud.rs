@@ -190,9 +190,17 @@ pub fn draw_title(art: &Art, u: f32, t: f32, defs: &[StationDef], mode: Mode) {
     let help = match mode {
         Mode::Touch => "LEFT STICK MOVE   RIGHT STICK AIM   AUTO-AIM WHEN IDLE",
         Mode::Pad => "L-STICK MOVE   R-STICK AIM + FIRE   A DASH   RB GRENADE   START PAUSE",
-        Mode::Mouse => "WASD MOVE   MOUSE AIM + FIRE   SPACE DASH   RIGHT CLICK GRENADE   M MUTE",
+        Mode::Mouse => "WASD MOVE   MOUSE AIM + FIRE   SPACE DASH   RIGHT CLICK GRENADE",
     };
     text_c(art, help, sw * 0.5, sh * 0.72, fit(help, u, sw * 0.92), CREAM);
+    let opts = match mode {
+        Mode::Touch => "",
+        Mode::Pad => "Y TILT-SHIFT   BACK MUTE",
+        Mode::Mouse => "T TILT-SHIFT   M MUTE   ESC PAUSE",
+    };
+    if !opts.is_empty() {
+        text_c(art, opts, sw * 0.5, sh * 0.72 + 11.0 * u, fit(opts, u, sw * 0.92), DIM);
+    }
     if (t * 2.0) as i32 % 2 == 0 {
         let s = match mode {
             Mode::Touch => "TAP TO START",
@@ -264,12 +272,18 @@ pub fn draw_upgrade(art: &Art, u: f32, t: f32, next: &StationDef, choices: &[usi
     rects
 }
 
-pub fn draw_pause(art: &Art, u: f32, mode: Mode) {
+pub fn draw_pause(art: &Art, u: f32, mode: Mode, tilt: bool, muted: bool) {
     let (sw, sh) = (screen_width(), screen_height());
     draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, 0.55));
-    text_c(art, "PAUSED", sw * 0.5, sh * 0.38, fit("PAUSED", 4.0 * u, sw * 0.9), CREAM);
+    text_c(art, "PAUSED", sw * 0.5, sh * 0.32, fit("PAUSED", 4.0 * u, sw * 0.9), CREAM);
     let s = if mode == Mode::Pad { "PRESS START TO RESUME" } else { "PRESS ESC OR P TO RESUME" };
-    text_c(art, s, sw * 0.5, sh * 0.38 + 40.0 * u, fit(s, u, sw * 0.9), DIM);
+    text_c(art, s, sw * 0.5, sh * 0.32 + 40.0 * u, fit(s, u, sw * 0.9), DIM);
+    let (tk, mk) = if mode == Mode::Pad { ("Y", "BACK") } else { ("T", "M") };
+    let onoff = |b: bool| if b { "ON" } else { "OFF" };
+    let l1 = format!("{}   TILT-SHIFT  {}", tk, onoff(tilt));
+    let l2 = format!("{}   SOUND  {}", mk, onoff(!muted));
+    text_c(art, &l1, sw * 0.5, sh * 0.32 + 60.0 * u, fit(&l1, u, sw * 0.9), GREEN);
+    text_c(art, &l2, sw * 0.5, sh * 0.32 + 72.0 * u, fit(&l2, u, sw * 0.9), GREEN);
 }
 
 pub fn draw_end(art: &Art, u: f32, t: f32, title: &str, lines: &[String], prompt: &str, color: Color) {

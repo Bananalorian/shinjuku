@@ -167,6 +167,20 @@ pub struct Ring {
     pub color: Color,
 }
 
+/// Tokyo's crows. They peck around the platforms and scatter when you get close or start shooting.
+#[derive(Clone, Copy)]
+pub struct Bird {
+    pub pos: Vec2,
+    pub z: f32,
+    pub vel: Vec3,
+    pub flying: bool,
+    pub leaving: bool,
+    pub target: Vec2,
+    pub t: f32,
+    pub anim: f32,
+    pub face_left: bool,
+}
+
 #[derive(Clone, Copy)]
 pub struct Ghost {
     pub pos: Vec2,
@@ -248,6 +262,8 @@ pub enum Sfx {
     Train,
     Chime,
     Clear,
+    Caw(Vec2),
+    Zap(Vec2),
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -280,6 +296,10 @@ pub struct World {
     pub lights: Vec<TempLight>,
     pub rings: Vec<Ring>,
     pub ghosts: Vec<Ghost>,
+    pub birds: Vec<Bird>,
+    kill_spots: Vec<Vec2>,
+    bird_t: f32,
+    loud: (Vec2, f32), // where and when something loud happened
     pub kills: u32,
     pub quota: u32,
     pub total_kills: u32,
@@ -338,7 +358,11 @@ fn gibs(ps: &mut Vec<Particle>, pos: Vec2, n: usize, power: f32) {
 impl World {
     pub fn new(station: usize, defs: &[StationDef], art: &crate::art::Art, stats: Stats, total_kills: u32, demo: bool) -> World {
         let def = &defs[station];
-        let map = Map::build(def, station, art);
+        let next = match defs.get(station + 1) {
+            Some(n) => format!("FOR {}", n.name),
+            None => "OUT OF SERVICE".to_string(),
+        };
+        let map = Map::build(def, station, &next, art);
         let start_y = if map.track_ys.len() >= 2 {
             (map.track_ys[0] + map.track_ys[1]) * 0.5
         } else {
@@ -381,6 +405,10 @@ impl World {
             lights: Vec::new(),
             rings: Vec::new(),
             ghosts: Vec::new(),
+            birds: Vec::new(),
+            kill_spots: Vec::new(),
+            bird_t: 4.0,
+            loud: (Vec2::ZERO, -99.0),
             kills: 0,
             quota: def.quota,
             total_kills,
@@ -413,6 +441,19 @@ impl World {
             map,
         };
         w.map.update_flow(w.player.pos);
+        // a few crows already picking at the platforms
+        let n = 4 + station * 2;
+        let mut tries = 0;
+        while w.birds.len() < n && tries < 200 {
+            tries += 1;
+            let p = vec2(rnd(2.5, w.map.w as f32 - 1.5), rnd(1.8, w.map.h as f32 - 1.0));
+            if w.map.tile(p.x, p.y) == Tile::Track || w.map.solid_at(p) || p.distance(w.player.pos) < 5.0 {
+                continue;
+            }
+            let mut q = p;
+            w.map.resolve(&mut q, 0.2, true);
+            w.birds.push(Bird { pos: q, z: 0.0, vel: Vec3::ZERO, flying: false, leaving: false, target: q, t: rnd(0.0, 5.0), anim: 0.0, face_left: chance(0.5) });
+        }
         w
     }
 
@@ -450,6 +491,8 @@ impl World {
         self.update_pickups(dt);
         self.update_train(dt);
         self.update_particles(dt);
+        self.update_birds(dt);
+        self.update_atmosphere(dt);
         self.update_phase(dt);
 
         // ambient dust motes drifting through the lamplight
@@ -564,6 +607,7 @@ impl World {
             p.fire_cd = 1.0 / st.rate;
             p.muzzle = 0.05;
             self.sfx.push(Sfx::Shot);
+            self.loud = (p.pos, self.time);
             let base = p.aim.y.atan2(p.aim.x);
             let n = st.multishot;
             let muzzle = p.pos + p.aim * 0.5;
@@ -807,8 +851,7 @@ impl World {
             z.vel += (target_v - z.vel) * (1.0 - (-6.0 * dt).exp());
             z.knock *= (-7.0 * dt).exp();
             z.pos += (z.vel + z.knock) * dt + push[i] * 0.6;
-            let inner = false;
-            self.map.resolve(&mut z.pos, z.r.min(0.45), inner);
+            self.map.resolve_ex(&mut z.pos, z.r.min(0.45), false, z.kind == ZKind::Boss);
             if let Some(t) = &self.train {
                 push_out_of_train(t, &mut z.pos, z.r);
             }
@@ -891,6 +934,10 @@ impl World {
         z.dead = true;
         let (pos, kind) = (z.pos, z.kind);
         self.sfx.push(Sfx::Splat(pos, kind));
+        if self.kill_spots.len() >= 16 {
+            self.kill_spots.remove(0);
+        }
+        self.kill_spots.push(pos);
         let big = match kind {
             ZKind::Boss => 3.0,
             ZKind::Brute => 1.6,
@@ -1027,6 +1074,7 @@ impl World {
     fn explode(&mut self, at: Vec2) {
         let r = self.stats.gren_radius;
         self.sfx.push(Sfx::Explode(at));
+        self.loud = (at, self.time);
         self.shake = (self.shake + 0.55).min(1.0);
         self.flash = 0.22;
         self.shock = Some((at, 0.0));
@@ -1129,7 +1177,7 @@ impl World {
                 for (i, s) in t.slices.iter().enumerate() {
                     if *s == SliceK::Door {
                         let cx = t.slice_x(i) + 0.5;
-                        if (p.x - cx).abs() < 0.6 && (p.y - t.y).abs() < 1.5 {
+                        if (p.x - cx).abs() < 0.6 && (p.y - t.y).abs() < 2.2 {
                             self.events.push(Event::Boarded);
                             self.phase = Phase::Won; // freeze gameplay while main swaps scenes
                             return;
@@ -1172,15 +1220,16 @@ impl World {
                         .copied()
                         .min_by(|a, b| (a - self.player.pos.y).abs().partial_cmp(&(b - self.player.pos.y).abs()).unwrap())
                         .unwrap_or(5.0);
-                    let mut slices = Vec::new();
-                    for car in 0..4 {
-                        let first = if car == 0 { SliceK::Cab } else { SliceK::Body };
-                        slices.extend_from_slice(&[first, SliceK::Body, SliceK::Door, SliceK::Body, SliceK::Body, SliceK::Door, SliceK::Body]);
-                        if car < 3 {
-                            slices.push(SliceK::Gap);
-                        }
-                    }
-                    let target = (self.map.w - 2) as f32;
+                    let slices: Vec<SliceK> = train_pattern()
+                        .iter()
+                        .map(|k| match k {
+                            0 => SliceK::Cab,
+                            2 => SliceK::Door,
+                            3 => SliceK::Gap,
+                            _ => SliceK::Body,
+                        })
+                        .collect();
+                    let target = train_stop_head(self.map.w);
                     self.train = Some(Train { head: 0.0, target, y, slices, stopped_t: 0.0, doors_open: false });
                     self.sfx.push(Sfx::Horn);
                     self.sfx.push(Sfx::Train);
@@ -1203,6 +1252,99 @@ impl World {
                 }
             }
             Phase::Boss => {}
+        }
+    }
+
+    // ------------------------------------------------------------ crows
+
+    fn update_birds(&mut self, dt: f32) {
+        let ppos = self.player.pos;
+        let (loud_at, loud_t) = self.loud;
+        let recent_noise = self.time - loud_t < 0.4;
+        let mut caws = Vec::new();
+        for b in &mut self.birds {
+            b.t += dt;
+            if !b.flying {
+                // idle: peck, hop now and then
+                if b.vel.length_squared() > 0.0 {
+                    b.pos += vec2(b.vel.x, b.vel.y) * dt;
+                    b.vel *= (-10.0 * dt).exp();
+                    if b.vel.length() < 0.05 {
+                        b.vel = Vec3::ZERO;
+                    }
+                } else if chance(dt * 0.5) {
+                    let d = rand_dir();
+                    b.vel = vec3(d.x, d.y, 0.0) * 1.5;
+                    b.face_left = world_to_screen_dir(d).x < 0.0;
+                }
+                let scared = b.pos.distance(ppos) < 3.2 && self.phase != Phase::Dead
+                    || (recent_noise && b.pos.distance(loud_at) < 7.0)
+                    || self.zombies.iter().any(|z| z.pos.distance(b.pos) < 0.9);
+                if scared {
+                    let away = (b.pos - ppos).normalize_or_zero();
+                    let d = (away + rand_dir() * 0.5).normalize_or_zero();
+                    b.flying = true;
+                    b.leaving = true;
+                    b.vel = vec3(d.x * rnd(3.0, 5.0), d.y * rnd(3.0, 5.0), rnd(45.0, 75.0));
+                    b.face_left = world_to_screen_dir(d).x < 0.0;
+                    caws.push(b.pos);
+                }
+            } else if b.leaving {
+                b.pos += vec2(b.vel.x, b.vel.y) * dt;
+                b.z += b.vel.z * dt;
+                b.anim += dt * 16.0;
+            } else {
+                // gliding in to land
+                let to = b.target - b.pos;
+                b.pos += to.normalize_or_zero() * (to.length() * 1.5).min(4.0) * dt;
+                b.z = (b.z - 38.0 * dt).max(0.0);
+                b.anim += dt * 9.0;
+                if b.z <= 0.0 {
+                    b.flying = false;
+                    b.vel = Vec3::ZERO;
+                }
+            }
+        }
+        self.birds.retain(|b| !(b.leaving && b.z > 120.0));
+        for p in caws.into_iter().take(2) {
+            self.sfx.push(Sfx::Caw(p));
+        }
+        // new crows drift in to pick at the dead
+        self.bird_t -= dt;
+        let max = 4 + self.station * 2;
+        if self.bird_t <= 0.0 && self.birds.len() < max && !self.kill_spots.is_empty() && !self.demo {
+            self.bird_t = rnd(5.0, 10.0);
+            let target = self.kill_spots[rand::gen_range(0, self.kill_spots.len())] + rand_dir() * rnd(0.3, 1.0);
+            if target.distance(ppos) > 5.0 && self.map.tile(target.x, target.y) != Tile::Track {
+                let from = target + rand_dir() * 6.0;
+                self.birds.push(Bird { pos: from, z: 90.0, vel: Vec3::ZERO, flying: true, leaving: false, target, t: 0.0, anim: 0.0, face_left: (target - from).x - (target - from).y < 0.0 });
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ atmosphere
+
+    fn update_atmosphere(&mut self, dt: f32) {
+        let ppos = self.player.pos;
+        // failing fluorescent tubes spit sparks
+        let lamps: Vec<Vec2> = self.map.lights.iter().filter(|l| l.flicker > 0.0 && l.pos.distance(ppos) < 14.0).map(|l| l.pos).collect();
+        for at in lamps {
+            if chance(dt * 0.22) {
+                for _ in 0..rand::gen_range(6, 12) {
+                    let d = rand_dir();
+                    emit(&mut self.particles, particle(PK::Spark, at, 58.0, vec3(d.x * rnd(0.5, 2.0), d.y * rnd(0.5, 2.0), rnd(-20.0, 40.0)), rnd(0.5, 1.0), 1.0, Color::new(0.75, 0.9, 1.0, 1.0)));
+                }
+                self.lights.push(TempLight { pos: at, radius: 2.2, color: Color::new(0.7, 0.85, 1.0, 1.0), life: 0.12, max: 0.12 });
+                self.sfx.push(Sfx::Zap(at));
+            }
+        }
+        // stale air drifting out of the tunnels
+        let tunnels: Vec<Vec2> = self.map.tunnel_spawns.iter().copied().filter(|t| t.distance(ppos) < 18.0).collect();
+        for t in tunnels {
+            if chance(dt * 1.4) {
+                let p = t + vec2(0.1, rnd(-1.2, 1.2));
+                emit(&mut self.particles, particle(PK::Smoke, p, rnd(2.0, 18.0), vec3(rnd(0.3, 0.7), rnd(-0.1, 0.1), rnd(1.0, 3.0)), rnd(3.0, 5.0), rnd(6.0, 10.0), Color::new(0.45, 0.45, 0.5, 0.22)));
+            }
         }
     }
 
