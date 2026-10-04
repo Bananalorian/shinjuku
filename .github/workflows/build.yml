@@ -25,9 +25,9 @@ concurrency:
 jobs:
   web:
     name: Browser build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.91.1"
@@ -40,11 +40,11 @@ jobs:
           mkdir -p site
           cp dist/index.html site/index.html
           cp dist/index.html last-train-to-shinjuku-browser.html
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: release-browser
           path: last-train-to-shinjuku-browser.html
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
@@ -52,15 +52,13 @@ jobs:
     name: Publish to GitHub Pages
     needs: web
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    # Fails harmlessly until Pages is switched on (Settings > Pages > Source: GitHub Actions)
-    continue-on-error: true
+    runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
   native:
     name: Desktop build (${{ matrix.name }})
@@ -68,7 +66,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             name: linux-x86_64
           - os: windows-latest
             name: windows-x86_64
@@ -76,13 +74,13 @@ jobs:
             name: macos-universal
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.91.1"
       - uses: Swatinem/rust-cache@v2
       # same Python on every OS (Windows runners don't ship a `python3` command)
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Linux libraries (sound + controllers)
@@ -103,7 +101,7 @@ jobs:
             target/x86_64-apple-darwin/release/shinjuku
       - name: Package
         run: python .github/package.py ${{ matrix.name }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: release-${{ matrix.name }}
           path: last-train-to-shinjuku-${{ matrix.name }}.zip
@@ -112,18 +110,18 @@ jobs:
     name: GitHub Release
     needs: [web, native]
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # only the release-* artifacts (skips the GitHub Pages bundle)
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: release-*
           path: out
           merge-multiple: true
       - name: Release notes from CHANGELOG.md
         run: python3 .github/notes.py "${GITHUB_REF_NAME}" "${GITHUB_REPOSITORY}" > notes.md
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           name: Last Train to Shinjuku ${{ github.ref_name }}
           body_path: notes.md
