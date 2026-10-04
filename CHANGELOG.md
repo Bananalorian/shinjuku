@@ -16,7 +16,8 @@ each tag publishes a GitHub Release with downloads.
   aiming and the on-screen hints, so you can switch mid-run.
 - Upgrade cards can be chosen with the d-pad or arrow keys.
 - GitHub repository with CI: every push builds the browser version and desktop
-  builds for Windows, macOS and Linux; version tags publish a Release.
+  builds for Windows, macOS and Linux; version tags publish a Release. CI is pinned
+  to Rust 1.91.1, the version the game is developed and tested with.
 
 ### Fixed
 - Sound on phones: audio now unlocks on the first finished tap (iOS requirement) and

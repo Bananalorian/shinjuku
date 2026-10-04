@@ -3,6 +3,9 @@
 # single-file browser build plus Windows, macOS and Linux downloads.
 name: Build
 
+# Rust is pinned to the exact version the game is developed and tested with, so a
+# new stable release can't break the build without anyone touching the code.
+
 on:
   push:
     branches: [main]
@@ -25,8 +28,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.91.1"
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --target wasm32-unknown-unknown
@@ -73,7 +77,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
       - uses: Swatinem/rust-cache@v2
       # same Python on every OS (Windows runners don't ship a `python3` command)
       - uses: actions/setup-python@v5
@@ -88,7 +94,7 @@ jobs:
       - name: Build universal binary (Apple Silicon + Intel)
         if: runner.os == 'macOS'
         run: |
-          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          rustup target add --toolchain 1.91.1 aarch64-apple-darwin x86_64-apple-darwin
           cargo build --release --target aarch64-apple-darwin
           cargo build --release --target x86_64-apple-darwin
           mkdir -p target/release
