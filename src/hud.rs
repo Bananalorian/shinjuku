@@ -80,13 +80,9 @@ pub fn draw_hud(w: &World, art: &Art, u: f32, defs: &[StationDef], input: &Input
     text(art, w.name, nx, m, 2.0 * u, CREAM);
     let prog = (w.kills as f32 / w.quota as f32).min(1.0);
     let bw = 92.0 * u;
-    if !w.story {
-        bar(nx, m + 17.0 * u, bw, 3.0 * u, prog, GREEN, u);
-    }
+    bar(nx, m + 17.0 * u, bw, 3.0 * u, prog, GREEN, u);
     let label = match w.phase {
-        Phase::Train if w.story => "THE TRAIN IS HERE. GET ON.".to_string(),
-        Phase::Boss if w.story => "SOMETHING BIG IS HERE.".to_string(),
-        _ if w.story => "CLEAR THE STATION. SEARCH THE DEAD.".to_string(),
+        Phase::Boss if w.story => "KILL IT".to_string(),
         Phase::Train => "BOARD THE TRAIN".to_string(),
         Phase::Boss => "KILL THE RUSH HOUR".to_string(),
         _ => format!("CLEARED {}/{}", w.kills.min(w.quota), w.quota),
@@ -144,7 +140,7 @@ pub fn draw_hud(w: &World, art: &Art, u: f32, defs: &[StationDef], input: &Input
     bar(dx, by, 23.0 * u, 4.0 * u, dk, Color::new(0.35, 0.9, 1.0, 1.0), u);
     let ks = format!("{} KILLS", w.total_kills);
     text(art, &ks, sw - m - text_w(&ks, u), by - 2.0 * u, u, DIM);
-    if w.story {
+    if w.story && w.coins > 0 && false {
         let cs = format!("{}", w.coins);
         let cx = sw - m - text_w(&cs, 2.0 * u);
         let cy = by - 22.0 * u;

@@ -46,11 +46,12 @@ to clear the stations.
 ## The loop
 
 30 stations, from Akihabara all the way around the Yamanote line and back.
-Stations come in four sizes, from small platform-only stops up to huge three-track
-stations with underground halls. Each one has a hidden kill quota: clear enough of
-the dead and the station falls quiet, and the train comes back for you. It gets
-harder all the way round. Search bodies for coins. Bosses wait at the big stations:
-Ueno, Ikebukuro, Shinjuku, Shibuya, Shinagawa, Tokyo, and Akihabara at the end.
+It plays like Arcade: every station has a kill count, and when you hit it the
+station is clear and the train comes back for you. Pick an upgrade card on every
+ride. Stations come in four sizes, from smaller stops up to huge three-track
+stations with underground halls, and it gets harder all the way round. Bosses
+wait at the big stations: Ueno, Ikebukuro, Shinjuku, Shibuya, Shinagawa, Tokyo,
+and Akihabara at the end.
 
 ## Controls
 

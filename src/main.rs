@@ -211,22 +211,13 @@ impl Game {
         let next = LOOP.get(i + 1).map(|n| format!("FOR {}", n.name)).unwrap_or_else(|| "OUT OF SERVICE".to_string());
         let mut w = World::from_def(&def, &next, i + 1, &self.art, self.stats, self.kills_at_start, false);
         w.story = true;
-        w.campaign = true;
         w.loop_pos = Some((i, LOOP.len()));
         w.next_name = LOOP.get(i + 1).map(|n| n.name.to_string()).unwrap_or_default();
         w.final_boss = i == LOOP.len() - 1;
         w.has_light = self.camp.has_light;
         w.light_on = self.camp.light_on;
         w.coins = self.camp.coins;
-        let (wanderers, bodies) = match LOOP[i].size {
-            0 => (20, 14),
-            1 => (30, 20),
-            2 => (46, 30),
-            _ => (56, 34),
-        };
-        w.populate_idle(wanderers + i);
-        w.scatter_bodies(bodies);
-        let line = if w.final_boss { "WHERE IT STARTED. FINISH IT." } else if LOOP[i].boss { "SOMETHING BIG IS DOWN HERE. YOU CAN FEEL IT." } else { "CLEAR IT OUT. SEARCH THE DEAD FOR COINS." };
+        let line = if w.final_boss { "WHERE IT STARTED. FINISH IT." } else if LOOP[i].boss { "SOMETHING BIG IS DOWN HERE. YOU CAN FEEL IT." } else { "CLEAR THE STATION." };
         w.say(&format!("{}  {}", LOOP[i].code, LOOP[i].name), line, 4.5);
         self.world = w;
         self.scene = Scene::Play;
@@ -524,7 +515,8 @@ impl Game {
                 }
             }
             Scene::Upgrade { choices } => {
-                let next = &self.defs[self.world.station + 1];
+                let loop_next = level::loop_def(self.camp.idx.min(level::LOOP.len() - 1));
+                let next = if self.game_mode == GameMode::Campaign { &loop_next } else { &self.defs[(self.world.station + 1).min(self.defs.len() - 1)] };
                 // navigate with d-pad/arrows, or hover with the mouse
                 let n = ui.nav.x + ui.nav.y;
                 if n != 0 {
@@ -551,8 +543,13 @@ impl Game {
                     if let Some(k) = pick {
                         self.audio.play(Id::Select, 1.0);
                         (upgrades()[choices[k]].apply)(&mut self.stats);
-                        let next = self.world.station + 1;
-                        self.start_station(next);
+                        if self.game_mode == GameMode::Campaign {
+                            let next = self.camp.idx;
+                            self.start_loop(next);
+                        } else {
+                            let next = self.world.station + 1;
+                            self.start_station(next);
+                        }
                     }
                 }
             }
@@ -564,14 +561,16 @@ impl Game {
                     self.fx.render(&r.world, &self.art, 1.35);
                     r.draw(&self.art, u);
                     if done {
-                        let next = self.camp.idx;
-                        self.start_loop(next);
+                        self.scene = Scene::Upgrade { choices: Self::roll_upgrades() };
+                        self.up_sel = 0;
+                        self.scene_t = 0.0;
+                        self.fade = 1.0;
                     } else {
                         self.ride = Some(r);
                     }
                 } else {
-                    let next = self.camp.idx;
-                    self.start_loop(next);
+                    self.scene = Scene::Upgrade { choices: Self::roll_upgrades() };
+                    self.scene_t = 0.0;
                 }
             }
             Scene::GameOver => {
@@ -841,11 +840,14 @@ async fn main() {
                 it.setup_aftermath(&mut game.world);
             }
         }
-        if d.scene == "akiba" {
+        if d.scene == "akiba" || d.scene == "akiba_clear" {
             game.camp.has_light = true;
             game.camp.light_on = true;
             game.game_mode = GameMode::Campaign;
             game.start_loop(std::env::var("SJ_LOOP").ok().and_then(|v| v.parse().ok()).unwrap_or(0));
+            if d.scene == "akiba_clear" {
+                game.world.kills = game.world.quota;
+            }
             #[cfg(not(target_arch = "wasm32"))]
             if let Ok(pos) = std::env::var("SJ_POS") {
                 let v: Vec<f32> = pos.split(',').filter_map(|n| n.parse().ok()).collect();

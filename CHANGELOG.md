@@ -3,6 +3,24 @@
 Every version is one build sprint. Newest first. Versions are tagged in git, and
 each tag publishes a GitHub Release with downloads.
 
+## [0.9.0] - 2026-10-05 - The loop plays like arcade
+
+### Changed
+- **The loop now plays just like Arcade.** Every station has a visible kill count
+  (CLEARED 12/54); hit it and you get STATION CLEAR, the train arrives, and you
+  board. Zombies hunt you from the moment you arrive, pouring in from the tunnels
+  and the dark edges, with more of them all the way round the loop.
+- **Upgrade cards are back, in the loop too:** after every ride (Miyake's call and
+  the auto voice included), you pick one of three cards before the next station.
+- **Bigger stations.** Small stops now have a concourse; medium ones are wider with
+  a larger concourse; large and huge ones are wider still, with the underground
+  halls.
+- **No coins or looting.** Bodies stay where they fell but there's nothing to
+  search, apart from the officer's flashlight in the opening. The coin counter is
+  gone, and so is the vending-machine shop that was planned.
+- Quotas start around 36-76 depending on station size and climb to a few hundred
+  by the end of the loop; spawn rates and the number alive at once climb with them.
+
 ## [0.8.1] - 2026-10-05 - Arcade is back
 
 ### Changed

@@ -281,7 +281,6 @@ impl Intro {
             }
             let mut n = Npc::new(p, look, NpcState::Corpse);
             n.face_left = chance(0.5);
-            n.loot = if chance(0.4) { 0 } else { rand::gen_range(3, 20) };
             w.npcs.push(n);
             w.map.stamp(p, rnd(0.5, 0.9), 2);
         }
@@ -792,7 +791,6 @@ impl Intro {
                         if let Some(n) = w.npcs.get_mut(oi) {
                             n.state = NpcState::Corpse;
                             n.flashlight = true;
-                            n.loot = 60;
                         }
                         self.cop_body = Some(oi);
                         w.blood_burst(opos, (opos - zp).normalize_or_zero(), 24);
@@ -877,7 +875,7 @@ impl Intro {
                         self.objective = None;
                         self.prompt = Some(Prompt::Light);
                         self.light_hint_t = 5.0;
-                        self.say("YOU", "A FLASHLIGHT. AND SOME COINS. SORRY, OFFICER.");
+                        self.say("YOU", "HIS FLASHLIGHT. ...SORRY, OFFICER.");
                     }
                     if self.light_hint_t > 0.0 {
                         self.light_hint_t -= dt;

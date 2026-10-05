@@ -1354,6 +1354,7 @@ impl World {
     }
 
     /// Campaign: zombies already shambling around the level when you arrive.
+    #[allow(dead_code)]
     pub fn populate_idle(&mut self, n: usize) {
         let mut tries = 0;
         let mut placed = 0;
@@ -1374,6 +1375,7 @@ impl World {
     }
 
     /// Campaign: the dead, some with coins in their pockets.
+    #[allow(dead_code)]
     pub fn scatter_bodies(&mut self, n: usize) {
         let mut tries = 0;
         let mut placed = 0;
@@ -1397,7 +1399,7 @@ impl World {
         self.npcs
             .iter()
             .enumerate()
-            .filter(|(_, n)| n.state == NpcState::Corpse && !n.searched && n.pos.distance(self.player.pos) < 1.2)
+            .filter(|(_, n)| n.state == NpcState::Corpse && !n.searched && (n.loot > 0 || n.flashlight) && n.pos.distance(self.player.pos) < 1.2)
             .min_by(|a, b| a.1.pos.distance(self.player.pos).partial_cmp(&b.1.pos.distance(self.player.pos)).unwrap())
             .map(|(i, _)| i)
     }
@@ -1606,11 +1608,7 @@ impl World {
                         self.phase = Phase::Train;
                         self.phase_t = 0.0;
                         self.sfx.push(Sfx::Clear);
-                        if self.story {
-                            self.say("THE STATION FALLS QUIET", "A TRAIN IS COMING. GET TO THE PLATFORMS.", 4.5);
-                        } else {
-                            self.say("STATION CLEAR", "TRAIN ARRIVING - GET TO THE DOORS", 4.0);
-                        }
+                        self.say("STATION CLEAR", "TRAIN ARRIVING - GET TO THE DOORS", 4.0);
                     }
                 }
             }

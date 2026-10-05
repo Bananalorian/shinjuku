@@ -129,10 +129,10 @@ pub fn loop_def(i: usize) -> StationDef {
     let stop = &LOOP[i];
     let f = i as f32;
     let (width, bands, mult) = match stop.size {
-        0 => (28, vec![(Platform, 5), (Track, 3), (Platform, 6), (Track, 3), (Platform, 5)], 0.7),
-        1 => (36, vec![(Platform, 6), (Track, 3), (Platform, 7), (Track, 3), (Platform, 6), (Concourse, 6)], 1.0),
-        2 => (46, vec![(Platform, 6), (Track, 3), (Platform, 7), (Track, 3), (Platform, 5), (Concourse, 30)], 1.4),
-        _ => (50, vec![(Platform, 6), (Track, 3), (Platform, 6), (Track, 3), (Platform, 6), (Track, 3), (Platform, 5), (Concourse, 28)], 1.8),
+        0 => (36, vec![(Platform, 6), (Track, 3), (Platform, 7), (Track, 3), (Platform, 6), (Concourse, 6)], 0.8),
+        1 => (42, vec![(Platform, 7), (Track, 3), (Platform, 8), (Track, 3), (Platform, 6), (Concourse, 10)], 1.0),
+        2 => (50, vec![(Platform, 6), (Track, 3), (Platform, 7), (Track, 3), (Platform, 5), (Concourse, 30)], 1.2),
+        _ => (54, vec![(Platform, 6), (Track, 3), (Platform, 6), (Track, 3), (Platform, 6), (Track, 3), (Platform, 5), (Concourse, 28)], 1.4),
     };
     // a handful of looks so neighbouring stations feel different
     let looks: [(Color, Color, Color, Color, Vec<Color>); 6] = [
@@ -152,9 +152,10 @@ pub fn loop_def(i: usize) -> StationDef {
         code: stop.code,
         width,
         bands,
-        quota: ((14.0 + f * 2.2) * mult) as u32, // hidden: the train only comes once enough are dead
-        max_alive: (34.0 + f * 2.2).min(100.0) as usize,
-        spawn_rate: (0.3 + f * 0.03, 0.3 + f * 0.03),
+        // like arcade: kill this many and the station is clear
+        quota: ((45.0 + f * 6.0) * mult) as u32,
+        max_alive: (45.0 + f * 7.0).min(320.0) as usize,
+        spawn_rate: ((1.4 + f * 0.18).min(10.0), (2.8 + f * 0.32).min(16.0)),
         mix: [1.0, (0.08 + f * 0.03).min(0.8), if i >= 5 { (0.02 + f * 0.008).min(0.25) } else { 0.0 }],
         ambient,
         wall,
@@ -1041,6 +1042,7 @@ impl Map {
         false
     }
 
+    #[allow(dead_code)]
     pub fn blocked_at(&self, p: Vec2) -> bool {
         let (x, y) = (p.x.floor() as i32, p.y.floor() as i32);
         x < 0 || y < 0 || x >= self.gw || y >= self.gh || self.blocked[(y * self.gw + x) as usize]
