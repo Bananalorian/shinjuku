@@ -314,17 +314,17 @@ impl Intro {
                     w.sfx.push(Sfx::Chime);
                     self.say("ANNOUNCEMENT", "THANK YOU FOR RIDING THE YAMANOTE LINE.");
                 }
-                if at > 6.0 && at - dt <= 6.0 {
+                if at > 5.5 && at - dt <= 5.5 {
                     self.say("ANNOUNCEMENT", "THIS TRAIN IS BOUND FOR UENO AND IKEBUKURO.");
                 }
-                if at > 12.0 && at - dt <= 12.0 {
+                if at > 10.5 && at - dt <= 10.5 {
                     w.sfx.push(Sfx::Chime);
                     self.say("ANNOUNCEMENT", "THE NEXT STATION IS KANDA. THE DOORS ON THE LEFT SIDE WILL OPEN.");
                 }
-                if at > 20.0 {
-                    w.car_speed = approach(w.car_speed, 0.0, dt * 3.2);
+                if at > 16.5 {
+                    w.car_speed = approach(w.car_speed, 0.0, dt * 3.0);
                 }
-                if at > 20.0 && at - dt <= 20.0 {
+                if at > 16.5 && at - dt <= 16.5 {
                     Self::lurch(w, vec2(1.0, 0.0), 2.0);
                 }
                 // the car sways side to side and everyone sways with it
@@ -334,7 +334,7 @@ impl Intro {
                     let dir = if chance(0.5) { vec2(0.0, 1.0) } else { vec2(0.0, -1.0) };
                     Self::lurch(w, dir, rnd(1.2, 2.2));
                 }
-                if at > 23.0 {
+                if at > 20.0 {
                     w.car_speed = 0.0;
                     w.car_doors_open = true;
                     w.sfx.push(Sfx::Chime);
@@ -383,6 +383,7 @@ impl Intro {
             // ------------------------------------------------ Akihabara, before
             Stage::Platform => {
                 self.black = (1.0 - self.t * 1.5).max(0.0);
+                w.walk_scale = 0.5; // shuffling along with the crowd
                 if self.prompt == Some(Prompt::Move) && ctl.mv.length() > 0.2 && self.t > 1.5 {
                     self.prompt = None;
                 }
@@ -403,8 +404,9 @@ impl Intro {
                     }
                 }
                 // partway down the platform, the ground starts to move
-                if (w.player.pos.x > w.map.w as f32 - 6.0 || self.t > 30.0) && self.t > 5.0 {
+                if (w.player.pos.x > w.map.w as f32 - 6.0 || self.t > 35.0) && self.t > 5.0 {
                     w.locked = true;
+                    w.walk_scale = 1.0;
                     self.objective = None;
                     self.marker = None;
                     self.prompt = None;
@@ -413,42 +415,54 @@ impl Intro {
             }
             Stage::Quake => {
                 w.player.vel *= 0.5;
-                if self.t > 0.3 && self.t - dt <= 0.3 {
-                    w.sfx.push(Sfx::Quake);
-                    self.say("YOU", "...?");
-                }
-                let wild = (self.t / 3.0).min(1.0);
-                w.shake = (w.shake + dt * 0.9).min(1.0);
-                w.light_scale = if chance(0.1 + wild * 0.35) { rnd(0.0, 0.4) } else { rnd(0.7, 1.0) };
-                if chance(dt * 2.5) {
-                    let p = w.player.pos + rand_dir() * rnd(2.0, 7.0);
-                    w.sfx.push(Sfx::Scream(p));
-                }
-                // the crowd panics: some run, some go down
-                if self.t > 1.2 && self.t - dt <= 1.2 {
-                    let ppos = w.player.pos;
-                    for n in w.npcs.iter_mut() {
-                        if chance(0.35) {
-                            n.state = NpcState::Corpse;
-                            n.face_left = chance(0.5);
-                        } else {
-                            n.state = NpcState::Walk;
-                            n.target = n.pos + rand_dir() * rnd(2.0, 5.0) + (n.pos - ppos).normalize_or_zero();
-                            n.speed = rnd(2.8, 3.8);
-                            n.after = NpcState::Corpse;
-                        }
+                let flicker_for = 3.4; // the lights go first
+                if self.t < flicker_for {
+                    w.light_scale = if chance(0.22) { rnd(0.0, 0.35) } else { rnd(0.75, 1.0) };
+                    if self.t > 0.7 && self.t - dt <= 0.7 {
+                        self.say("YOU", "WHAAAAA...?");
                     }
-                    w.npc_field.clear();
-                }
-                if self.t > 3.4 && !w.player_lying {
-                    w.player_lying = true; // knocked off your feet
-                }
-                if self.t > 4.2 {
-                    w.light_scale = 0.0;
-                    self.black = ((self.t - 4.2) * 1.2).min(1.0);
-                }
-                if self.t > 5.2 {
-                    self.go(Stage::Blackout);
+                    if chance(dt * 1.5) {
+                        let p = w.player.pos + rand_dir() * rnd(1.0, 4.0);
+                        w.sfx.push(Sfx::Zap(p));
+                    }
+                } else {
+                    let q = self.t - flicker_for;
+                    if q < dt * 1.5 {
+                        w.sfx.push(Sfx::Quake);
+                    }
+                    let wild = (q / 3.0).min(1.0);
+                    w.shake = (w.shake + dt * 0.9).min(1.0);
+                    w.light_scale = if chance(0.15 + wild * 0.35) { rnd(0.0, 0.4) } else { rnd(0.7, 1.0) };
+                    if chance(dt * 2.5) {
+                        let p = w.player.pos + rand_dir() * rnd(2.0, 7.0);
+                        w.sfx.push(Sfx::Scream(p));
+                    }
+                    // the crowd panics: some run, some go down
+                    if q > 1.0 && q - dt <= 1.0 {
+                        let ppos = w.player.pos;
+                        for n in w.npcs.iter_mut() {
+                            if chance(0.35) {
+                                n.state = NpcState::Corpse;
+                                n.face_left = chance(0.5);
+                            } else {
+                                n.state = NpcState::Walk;
+                                n.target = n.pos + rand_dir() * rnd(2.0, 5.0) + (n.pos - ppos).normalize_or_zero();
+                                n.speed = rnd(2.8, 3.8);
+                                n.after = NpcState::Corpse;
+                            }
+                        }
+                        w.npc_field.clear();
+                    }
+                    if q > 3.0 && !w.player_lying {
+                        w.player_lying = true; // knocked off your feet
+                    }
+                    if q > 3.8 {
+                        w.light_scale = 0.0;
+                        self.black = ((q - 3.8) * 1.2).min(1.0);
+                    }
+                    if q > 4.8 {
+                        self.go(Stage::Blackout);
+                    }
                 }
             }
             Stage::Blackout => {
@@ -459,12 +473,15 @@ impl Intro {
             }
             // ------------------------------------------------ Akihabara, after
             Stage::Wake => {
-                self.black = (1.0 - self.t * 0.35).max(0.0);
-                if self.t > 2.8 && w.player_lying {
+                self.black = (1.0 - self.t * 0.3).max(0.0);
+                w.walk_scale = 1.0;
+                if self.t > 3.4 && w.player_lying {
                     w.player_lying = false;
-                    self.say("YOU", "MY HEAD... WHAT HAPPENED?");
                 }
-                if self.t > 4.0 {
+                if self.t > 3.8 && self.t - dt <= 3.8 {
+                    self.say("YOU", "WHAT HAPPENED?!");
+                }
+                if self.t > 6.0 {
                     w.locked = false;
                     self.objective = Some("LOOK AROUND");
                     self.go(Stage::Explore);

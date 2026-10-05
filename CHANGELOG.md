@@ -3,6 +3,17 @@
 Every version is one build sprint. Newest first. Versions are tagged in git, and
 each tag publishes a GitHub Release with downloads.
 
+## [0.7.1] - 2026-10-05 - Slower opening
+
+### Changed
+- The train ride lasts 20 seconds, then the doors open at Kanda.
+- On the platform you shuffle along with the crowd at half walking speed (no
+  dashing) toward the exits at the east end.
+- The lights go first: a few seconds of flickering and electrical crackle, "WHAAAAA...?",
+  and only then the quake, the panic, and the blackout.
+- Waking up, you're down and out of control for a few seconds, then "WHAT HAPPENED?!",
+  then you're back at full speed.
+
 ## [0.7.0] - 2026-10-05 - Underground
 
 ### Changed

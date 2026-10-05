@@ -387,6 +387,8 @@ pub struct World {
     pub player_lying: bool,
     pub car_speed: f32,
     pub car_doors_open: bool,
+    /// Scripted moments slow your walk (1.0 = normal); dashing is off while it's below 1.
+    pub walk_scale: f32,
     pub campaign: bool,
     /// Any campaign world (shows coins, allows searching bodies).
     pub story: bool,
@@ -518,6 +520,7 @@ impl World {
             player_lying: false,
             car_speed: 0.0,
             car_doors_open: false,
+            walk_scale: 1.0,
             campaign: false,
             story: false,
             has_light: true,
@@ -703,7 +706,7 @@ impl World {
         if self.locked {
             p.dash_t = 0.0;
         }
-        if c.dash && p.dash_cd <= 0.0 && !self.locked {
+        if c.dash && p.dash_cd <= 0.0 && !self.locked && self.walk_scale >= 0.99 {
             p.dash_t = 0.17;
             p.dash_cd = st.dash_cd;
             p.iframes = p.iframes.max(0.28);
@@ -718,7 +721,7 @@ impl World {
             p.vel = p.dash_dir * 13.0;
             self.ghosts.push(Ghost { pos: p.pos, back: p.back, face_left: p.face_left, frame: (p.anim as usize) % 4, life: 0.25 });
         } else {
-            let target = mv_world * st.speed;
+            let target = mv_world * st.speed * self.walk_scale;
             p.vel += (target - p.vel) * (1.0 - (-14.0 * dt).exp());
         }
         p.moving = p.vel.length() > 0.4;
