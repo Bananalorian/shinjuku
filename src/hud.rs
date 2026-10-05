@@ -45,7 +45,7 @@ pub fn text_c(art: &Art, s: &str, cx: f32, y: f32, px: f32, color: Color) {
 }
 
 /// Fit a line of text to a width by shrinking the pixel size if needed.
-fn fit(s: &str, px: f32, max_w: f32) -> f32 {
+pub fn fit(s: &str, px: f32, max_w: f32) -> f32 {
     let mut p = px.round().max(1.0);
     while p > 1.0 && text_w(s, p) > max_w {
         p -= 1.0;

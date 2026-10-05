@@ -1,19 +1,38 @@
-//! What survives between runs: the coin bank (and, soon, permanent upgrades).
-//! The browser build keeps it in localStorage through a tiny JS plugin in
-//! web/template.html; desktop builds keep a small text file.
+//! What survives between runs: the coin bank, the permanent upgrades bought with
+//! it, and whether you've seen the opening. The browser build keeps it in
+//! localStorage through a tiny JS plugin in web/template.html; desktop builds keep
+//! a small text file.
 
-#[derive(Clone, Copy, Default, Debug)]
+use crate::shop::PERKS;
+
+#[derive(Clone, Copy, Debug)]
 pub struct Meta {
     pub bank: u32,
+    pub levels: [u8; PERKS.len()],
+    pub seen_intro: bool,
+    pub skip_intro: bool,
+}
+
+impl Default for Meta {
+    fn default() -> Self {
+        Meta { bank: 0, levels: [0; PERKS.len()], seen_intro: false, skip_intro: false }
+    }
 }
 
 impl Meta {
     pub fn load() -> Meta {
         let mut m = Meta::default();
         for line in read().lines() {
-            if let Some((k, v)) = line.split_once('=') {
-                if k.trim() == "bank" {
-                    m.bank = v.trim().parse().unwrap_or(0);
+            let Some((k, v)) = line.split_once('=') else { continue };
+            let (k, v) = (k.trim(), v.trim());
+            match k {
+                "bank" => m.bank = v.parse().unwrap_or(0),
+                "seen_intro" => m.seen_intro = v == "1",
+                "skip_intro" => m.skip_intro = v == "1",
+                _ => {
+                    if let Some(i) = PERKS.iter().position(|p| p.key == k) {
+                        m.levels[i] = v.parse::<u8>().unwrap_or(0).min(PERKS[i].costs.len() as u8);
+                    }
                 }
             }
         }
@@ -21,7 +40,11 @@ impl Meta {
     }
 
     pub fn save(&self) {
-        write(&format!("bank={}\n", self.bank));
+        let mut s = format!("bank={}\nseen_intro={}\nskip_intro={}\n", self.bank, self.seen_intro as u8, self.skip_intro as u8);
+        for (i, p) in PERKS.iter().enumerate() {
+            s.push_str(&format!("{}={}\n", p.key, self.levels[i]));
+        }
+        write(&s);
     }
 }
 

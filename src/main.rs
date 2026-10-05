@@ -19,6 +19,7 @@ mod level;
 mod pad;
 mod render;
 mod ride;
+mod shop;
 mod storage;
 mod synth;
 mod util;
@@ -51,6 +52,7 @@ struct Camp {
 
 enum Scene {
     Title,
+    Shop,
     Intro,
     Ride,
     Play,
@@ -85,6 +87,7 @@ struct Game {
     ride: Option<ride::Ride>,
     meta: storage::Meta,
     run_coins: u32, // banked at the end of the run
+    shop: shop::Shop,
 }
 
 impl Game {
@@ -114,6 +117,7 @@ impl Game {
             ride: None,
             meta: storage::Meta::load(),
             run_coins: 0,
+            shop: shop::Shop::new(),
             world,
             art,
             audio,
@@ -178,6 +182,40 @@ impl Game {
         self.start_station(0);
     }
 
+    /// Give a world the run's permanent upgrades.
+    fn equip(&self, w: &mut World) {
+        w.coin_mult = shop::coin_mult(&self.meta);
+        w.magnet = shop::magnet(&self.meta);
+    }
+
+    /// NEW GAME from the lockers: bake in the permanent upgrades, then the opening (or skip it).
+    fn begin_run(&mut self) {
+        self.game_mode = GameMode::Campaign;
+        self.camp = Camp::default();
+        self.run_coins = 0;
+        self.world.total_kills = 0;
+        self.run_time = 0.0;
+        self.stats = shop::starting_stats(&self.meta);
+        // head start: a free card or two before the first station
+        let mut got = Vec::new();
+        for _ in 0..shop::head_start(&self.meta) {
+            let cards = upgrades();
+            let k = rand::gen_range(0, cards.len());
+            (cards[k].apply)(&mut self.stats);
+            got.push(cards[k].name);
+        }
+        if !got.is_empty() {
+            self.toast = Some((format!("HEAD START: {}", got.join(" + ")), 3.5));
+        }
+        if self.meta.seen_intro && self.meta.skip_intro {
+            self.camp.has_light = true;
+            self.camp.light_on = true;
+            self.start_loop(0);
+        } else {
+            self.start_intro();
+        }
+    }
+
     /// The run is over (death or victory): put its coins in the bank and save.
     fn bank_run(&mut self) {
         if self.game_mode == GameMode::Campaign {
@@ -201,6 +239,7 @@ impl Game {
         self.stats_at_start = self.stats;
         self.kills_at_start = self.world.total_kills;
         let mut w = World::from_def(&level::kanda_def(), "FOR AKIHABARA", 0, &self.art, self.stats, self.kills_at_start, false);
+        self.equip(&mut w);
         w.story = true;
         w.has_light = self.camp.has_light;
         w.light_on = self.camp.light_on;
@@ -227,6 +266,7 @@ impl Game {
         let def = loop_def(i);
         let next = LOOP.get(i + 1).map(|n| format!("FOR {}", n.name)).unwrap_or_else(|| "OUT OF SERVICE".to_string());
         let mut w = World::from_def(&def, &next, i + 1, &self.art, self.stats, self.kills_at_start, false);
+        self.equip(&mut w);
         w.story = true;
         w.loop_pos = Some((i, LOOP.len()));
         w.next_name = LOOP.get(i + 1).map(|n| n.name.to_string()).unwrap_or_default();
@@ -250,11 +290,13 @@ impl Game {
         self.game_mode = GameMode::Campaign;
         self.camp = Camp::default();
         self.run_coins = 0;
-        self.stats = Stats::default();
         self.stats_at_start = self.stats;
         self.kills_at_start = 0;
         self.run_time = 0.0;
-        self.world = intro::make_car_world(&self.art);
+        let mut w = intro::make_car_world(&self.art);
+        w.stats = self.stats;
+        w.player.hp = self.stats.max_hp;
+        self.world = w;
         self.intro = Some(intro::Intro::new());
         self.arcade = None;
         self.scene = Scene::Intro;
@@ -300,6 +342,7 @@ impl Game {
         let mode = self.input.mode;
         let loops: &[(Id, f32)] = match self.scene {
             Scene::Title => &[(Id::Ambient, 0.5), (Id::Hum, 0.12)],
+            Scene::Shop => &[(Id::Ambient, 0.35), (Id::Hum, 0.08)],
             Scene::Intro if self.arcade.is_some() => &[(Id::Hum, 0.05)],
             Scene::Intro => match self.intro.as_ref().map(|i| i.stage) {
                 Some(intro::Stage::CarRide) | Some(intro::Stage::CarArrive) => &[(Id::Ride, 0.45)],
@@ -355,7 +398,38 @@ impl Game {
                 }
                 if go {
                     self.audio.play(Id::Select, 1.0);
-                    if self.menu_sel == 0 { self.start_intro(); } else { self.start_arcade(); }
+                    if self.menu_sel == 0 {
+                        self.shop = shop::Shop::new();
+                        self.scene = Scene::Shop;
+                        self.scene_t = 0.0;
+                    } else {
+                        self.start_arcade();
+                    }
+                }
+            }
+            Scene::Shop => {
+                let mouse = if mode == Mode::Mouse { Some(mouse_position().into()) } else { None };
+                let confirm = ui.confirm && self.scene_t > 0.3;
+                let (act, sound) = self.shop.update(&mut self.meta, ui.nav.y, confirm, ui.back, ui.tap, mouse, dt);
+                match sound {
+                    Some(true) => self.audio.play(Id::Coin, 1.0),
+                    Some(false) => self.audio.play(Id::Tick, 1.0),
+                    None => {}
+                }
+                if ui.nav.y != 0 {
+                    self.audio.play(Id::Select, 0.4);
+                }
+                self.shop.draw(&self.art, u, &self.meta, mode, self.scene_t);
+                match act {
+                    shop::Action::Start => {
+                        self.audio.play(Id::Select, 1.0);
+                        self.begin_run();
+                    }
+                    shop::Action::Back => {
+                        self.scene = Scene::Title;
+                        self.scene_t = 0.0;
+                    }
+                    shop::Action::None => {}
                 }
             }
             Scene::Intro => {
@@ -383,6 +457,9 @@ impl Game {
                     let out = it.update(&mut self.world, &mut ctl, &ui, mode, dt, &self.fx);
                     if out.need_platform {
                         self.world = World::from_def(&level::kanda_def(), "FOR AKIHABARA", 0, &self.art, self.stats, 0, false);
+                        let mut w = std::mem::replace(&mut self.world, Self::demo_world(&self.defs, &self.art));
+                        self.equip(&mut w);
+                        self.world = w;
                         self.world.story = true;
                         self.world.map.enable_breakables();
                         it.setup_platform(&mut self.world);
@@ -407,6 +484,10 @@ impl Game {
                         self.scene = Scene::GameOver;
                         self.scene_t = 0.0;
                     } else if out.finished {
+                        if !self.meta.seen_intro {
+                            self.meta.seen_intro = true;
+                            self.meta.save();
+                        }
                         if out.skipped {
                             // skipping still hands you what the opening would have
                             self.camp.has_light = true;
@@ -615,9 +696,9 @@ impl Game {
                 };
                 let roguelike = self.game_mode == GameMode::Campaign;
                 let prompt = match (mode, roguelike) {
-                    (Mode::Touch, true) => "TAP TO START A NEW RUN",
-                    (Mode::Pad, true) => "PRESS A FOR A NEW RUN",
-                    (Mode::Mouse, true) => "PRESS ENTER FOR A NEW RUN",
+                    (Mode::Touch, true) => "TAP TO VISIT THE COIN LOCKERS",
+                    (Mode::Pad, true) => "PRESS A FOR THE COIN LOCKERS",
+                    (Mode::Mouse, true) => "PRESS ENTER FOR THE COIN LOCKERS",
                     (Mode::Touch, false) => "TAP TO RETRY THIS STATION",
                     (Mode::Pad, false) => "PRESS A TO RETRY",
                     (Mode::Mouse, false) => "PRESS ENTER TO RETRY",
@@ -628,9 +709,10 @@ impl Game {
                     self.stats = self.stats_at_start;
                     self.world.total_kills = self.kills_at_start;
                     if self.game_mode == GameMode::Campaign {
-                        // no continues: back to the title for a fresh run
+                        // no continues: straight to the lockers to spend what you banked
                         self.world = Self::demo_world(&self.defs, &self.art);
-                        self.scene = Scene::Title;
+                        self.shop = shop::Shop::new();
+                        self.scene = Scene::Shop;
                         self.scene_t = 0.0;
                         self.fade = 1.0;
                     } else {
@@ -872,6 +954,13 @@ async fn main() {
                 it.setup_platform(&mut game.world);
                 it.setup_aftermath(&mut game.world);
             }
+        }
+        if d.scene == "shop" {
+            game.meta.bank = 420;
+            game.meta.levels[0] = 2;
+            game.meta.levels[2] = 1;
+            game.meta.seen_intro = true;
+            game.scene = Scene::Shop;
         }
         if d.scene == "smash" || d.scene == "akiba_dead" {
             game.game_mode = GameMode::Campaign;

@@ -3,6 +3,29 @@
 Every version is one build sprint. Newest first. Versions are tagged in git, and
 each tag publishes a GitHub Release with downloads.
 
+## [0.11.0] - 2026-10-05 - Coin lockers
+
+Sprint 2 of 4: the permanent upgrade shop.
+
+### Added
+- **Coin lockers.** NEW GAME (and every RUN OVER) takes you to a wall of station
+  coin lockers, where banked coins buy permanent upgrades that carry into every
+  run. Each has several levels, with prices that climb:
+  - TOUGHER: +15 max HP per level (5 levels)
+  - STEADY HANDS: +10% damage (5)
+  - QUICK TRIGGER: +8% fire rate (5)
+  - RUNNING SHOES: +5% move speed (3)
+  - DASH TRAINING: -10% dash cooldown (3)
+  - GRENADE POUCH: -12% grenade cooldown (3)
+  - LUCKY: +25% coins from smashing (3)
+  - MAGNET: coins pull in from farther away (2)
+  - HEAD START: start each run with a free upgrade card (2)
+- **Skip the opening:** once you've seen it, a locker row lets you skip straight to
+  Akihabara (pistol and flashlight in hand) on later runs. It's remembered.
+- Upgrade levels and the skip choice are saved with the bank.
+- Keyboard, mouse, controller and touch all work in the lockers: tap a locker to
+  select it, tap again to buy.
+
 ## [0.10.0] - 2026-10-05 - Smash and bank
 
 Sprint 1 of 4: roguelike runs and coins.

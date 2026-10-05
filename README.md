@@ -51,7 +51,8 @@ station is clear and the train comes back for you. Pick an upgrade card on every
 ride. Stations come in four sizes, from smaller stops up to huge three-track
 stations with underground halls, and it gets harder all the way round. It's a
 roguelike: die and the run is over. Smash vending machines, kiosks, bins and
-luggage for coins, which are banked between runs. Bosses
+luggage for coins, which are banked between runs and spent at the station's coin
+lockers on permanent upgrades before each new run. Bosses
 wait at the big stations: Ueno, Ikebukuro, Shinjuku, Shibuya, Shinagawa, Tokyo,
 and Akihabara at the end.
 
@@ -127,7 +128,8 @@ To inspect the raw sounds natively, run with `SJ_WAV=1` and they're written to `
 | `src/intro.rs` | The scripted, playable opening: train, quake, dash lesson, arcade, the officer's cutscene, the search |
 | `src/arcade.rs` | STAR COMMUTER, the playable arcade cabinet |
 | `src/ride.rs` | Rides between stations: the auto voice and Miyake on the radio |
-| `src/storage.rs` | The coin bank that survives between runs (localStorage / a small file) |
+| `src/storage.rs` | What survives between runs: bank, upgrades, skip-opening (localStorage / a file) |
+| `src/shop.rs` | The coin lockers: permanent upgrades and how they change your starting stats |
 | `src/world.rs` | All gameplay: player, zombies, bullets, grenades, particles, train, boss, upgrades |
 | `src/level.rs` | Station definitions, baked floor/wall image, props, lights, collision, flow field |
 | `src/render.rs` | Render pipeline and GLSL shaders (lighting composite, tilt-shift, bloom, grade) |
@@ -179,7 +181,7 @@ Renders scripted frames to `/tmp/sj_<frame>.png` and quits. `SJ_SCENE` can be
 `intro` (the opening from the top), `intro_after` (the opening from the quake on),
 `akiba` (a loop station; `SJ_LOOP=n` picks which, `SJ_POS=x,y` drops you somewhere),
 `ride` (Miyake's call on the train), `smash` (shoot a vending machine),
-`akiba_dead` (die in the loop and see the run-over screen),
+`akiba_dead` (die in the loop and see the run-over screen), `shop` (the lockers with test coins),
 or `pos:X,Y` to drop the player at a spot. With `SJ_AUTO=1` the opening plays itself. `SJ_SIZE=844x390` simulates a phone
 screen, `SJ_NOTILT=1` starts with tilt-shift off, `SJ_AUTO=1` turns on an autopilot
 that wanders and shoots, and `SJ_STATS=1` prints horde stats when it quits (handy

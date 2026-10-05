@@ -393,6 +393,9 @@ pub struct World {
     pub car_doors_open: bool,
     /// Scripted moments slow your walk (1.0 = normal); dashing is off while it's below 1.
     pub walk_scale: f32,
+    /// Permanent upgrades: more coins per smash, and how far coins pull in from.
+    pub coin_mult: f32,
+    pub magnet: f32,
     /// Where we are on the loop (index, total) and the next stop, for the HUD.
     pub loop_pos: Option<(usize, usize)>,
     pub next_name: String,
@@ -530,6 +533,8 @@ impl World {
             car_speed: 0.0,
             car_doors_open: false,
             walk_scale: 1.0,
+            coin_mult: 1.0,
+            magnet: 2.6,
             loop_pos: None,
             next_name: String::new(),
             final_boss: false,
@@ -1332,6 +1337,7 @@ impl World {
     fn update_pickups(&mut self, dt: f32) {
         let ppos = self.player.pos;
         let maxhp = self.stats.max_hp;
+        let magnet = self.magnet;
         let mut got = Vec::new();
         for (i, k) in self.pickups.iter_mut().enumerate() {
             k.t += dt;
@@ -1348,7 +1354,7 @@ impl World {
             if let PickupKind::Coin(_) = k.kind {
                 // coins get pulled in when you're close
                 let d = ppos - k.pos;
-                if d.length() < 2.6 && k.z <= 0.5 && k.t > 0.35 {
+                if d.length() < magnet && k.z <= 0.5 && k.t > 0.35 {
                     k.pos += d.normalize_or_zero() * (7.0 * dt).min(d.length());
                 }
             }
@@ -1504,7 +1510,7 @@ impl World {
             self.lights.push(TempLight { pos: c, radius: 2.4, color: Color::new(0.7, 0.85, 1.0, 1.0), life: 0.15, max: 0.15 });
         }
         // coins spill out
-        let total = pr.coins();
+        let total = ((pr.coins() as f32) * self.coin_mult).round() as u32;
         let pieces = (total as f32 / 2.0).ceil().max(1.0) as u32;
         for k in 0..pieces {
             let v = if k + 1 == pieces { total - 2 * (pieces - 1) } else { 2 }.max(1);
