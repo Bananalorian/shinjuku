@@ -19,6 +19,7 @@ mod level;
 mod pad;
 mod render;
 mod ride;
+mod storage;
 mod synth;
 mod util;
 mod world;
@@ -82,6 +83,8 @@ struct Game {
     menu_sel: usize,
     camp: Camp,
     ride: Option<ride::Ride>,
+    meta: storage::Meta,
+    run_coins: u32, // banked at the end of the run
 }
 
 impl Game {
@@ -109,6 +112,8 @@ impl Game {
             menu_sel: 0,
             camp: Camp::default(),
             ride: None,
+            meta: storage::Meta::load(),
+            run_coins: 0,
             world,
             art,
             audio,
@@ -173,6 +178,17 @@ impl Game {
         self.start_station(0);
     }
 
+    /// The run is over (death or victory): put its coins in the bank and save.
+    fn bank_run(&mut self) {
+        if self.game_mode == GameMode::Campaign {
+            self.run_coins = self.world.coins;
+            self.meta.bank += self.run_coins;
+            self.meta.save();
+            self.world.coins = 0;
+            self.camp.coins = 0;
+        }
+    }
+
     fn save_camp(&mut self) {
         self.camp.has_light = self.world.has_light;
         self.camp.light_on = self.world.light_on;
@@ -190,6 +206,7 @@ impl Game {
         w.light_on = self.camp.light_on;
         w.coins = self.camp.coins;
         w.birds.clear();
+        w.map.enable_breakables();
         w.say("JY02  KANDA", "HOLD OUT UNTIL A TRAIN COMES.", 4.0);
         self.world = w;
         self.scene = Scene::Play;
@@ -217,6 +234,7 @@ impl Game {
         w.has_light = self.camp.has_light;
         w.light_on = self.camp.light_on;
         w.coins = self.camp.coins;
+        w.map.enable_breakables();
         let line = if w.final_boss { "WHERE IT STARTED. FINISH IT." } else if LOOP[i].boss { "SOMETHING BIG IS DOWN HERE. YOU CAN FEEL IT." } else { "CLEAR THE STATION." };
         w.say(&format!("{}  {}", LOOP[i].code, LOOP[i].name), line, 4.5);
         self.world = w;
@@ -231,6 +249,7 @@ impl Game {
     fn start_intro(&mut self) {
         self.game_mode = GameMode::Campaign;
         self.camp = Camp::default();
+        self.run_coins = 0;
         self.stats = Stats::default();
         self.stats_at_start = self.stats;
         self.kills_at_start = 0;
@@ -316,6 +335,10 @@ impl Game {
                     self.audio.play(Id::Select, 0.5);
                 }
                 let rects = hud::draw_title(&self.art, u, t, &self.defs, mode, self.menu_sel);
+                if self.meta.bank > 0 {
+                    let s = format!("BANK {}", self.meta.bank);
+                    hud::text(&self.art, &s, screen_width() - hud::text_w(&s, u) - 6.0 * u, 6.0 * u, u, Color::new(1.0, 0.85, 0.3, 1.0));
+                }
                 if mode == Mode::Mouse {
                     let m: Vec2 = mouse_position().into();
                     if let Some(i) = rects.iter().position(|r| r.contains(m)) {
@@ -361,6 +384,7 @@ impl Game {
                     if out.need_platform {
                         self.world = World::from_def(&level::kanda_def(), "FOR AKIHABARA", 0, &self.art, self.stats, 0, false);
                         self.world.story = true;
+                        self.world.map.enable_breakables();
                         it.setup_platform(&mut self.world);
                     }
                     self.world.update(dt, &ctl);
@@ -379,6 +403,7 @@ impl Game {
                     }
                     if died {
                         self.audio.play(Id::GameOver, 1.0);
+                        self.bank_run();
                         self.scene = Scene::GameOver;
                         self.scene_t = 0.0;
                     } else if out.finished {
@@ -503,11 +528,13 @@ impl Game {
                         }
                         Event::Died => {
                             self.audio.play(Id::GameOver, 1.0);
+                            self.bank_run();
                             self.scene = Scene::GameOver;
                             self.scene_t = 0.0;
                         }
                         Event::Won => {
                             self.audio.play(Id::Victory, 1.0);
+                            self.bank_run();
                             self.scene = Scene::Victory;
                             self.scene_t = 0.0;
                         }
@@ -578,28 +605,34 @@ impl Game {
                 self.world.sfx.clear();
                 self.fx.render(&self.world, &self.art, 0.7);
                 let lines = if self.game_mode == GameMode::Campaign {
-                    vec![format!("{} KILLS", self.world.total_kills), format!("{} COINS", self.camp.coins)]
+                    let stops = if self.camp.level == 2 { self.camp.idx } else { 0 };
+                    vec![
+                        format!("{} STATIONS CLEARED   {} KILLS", stops, self.world.total_kills),
+                        format!("+{} COINS   BANK {}", self.run_coins, self.meta.bank),
+                    ]
                 } else {
                     vec![format!("{} KILLS", self.world.total_kills), "YOUR UPGRADES ARE KEPT".to_string()]
                 };
-                let prompt = match mode {
-                    Mode::Touch => "TAP TO RETRY THIS STATION",
-                    Mode::Pad => "PRESS A TO RETRY",
-                    Mode::Mouse => "PRESS ENTER TO RETRY",
+                let roguelike = self.game_mode == GameMode::Campaign;
+                let prompt = match (mode, roguelike) {
+                    (Mode::Touch, true) => "TAP TO START A NEW RUN",
+                    (Mode::Pad, true) => "PRESS A FOR A NEW RUN",
+                    (Mode::Mouse, true) => "PRESS ENTER FOR A NEW RUN",
+                    (Mode::Touch, false) => "TAP TO RETRY THIS STATION",
+                    (Mode::Pad, false) => "PRESS A TO RETRY",
+                    (Mode::Mouse, false) => "PRESS ENTER TO RETRY",
                 };
-                let title = format!("OVERRUN AT {}", self.world.name);
+                let title = if roguelike { format!("RUN OVER AT {}", self.world.name) } else { format!("OVERRUN AT {}", self.world.name) };
                 hud::draw_end(&self.art, u, self.scene_t, &title, &lines, prompt, hud::RED);
                 if ui.confirm && self.scene_t > 1.0 {
                     self.stats = self.stats_at_start;
                     self.world.total_kills = self.kills_at_start;
                     if self.game_mode == GameMode::Campaign {
-                        match self.camp.level {
-                            2 => {
-                                let i = self.camp.idx;
-                                self.start_loop(i);
-                            }
-                            _ => self.start_kanda(),
-                        }
+                        // no continues: back to the title for a fresh run
+                        self.world = Self::demo_world(&self.defs, &self.art);
+                        self.scene = Scene::Title;
+                        self.scene_t = 0.0;
+                        self.fade = 1.0;
                     } else {
                         let s = self.world.station;
                         self.start_station(s);
@@ -612,7 +645,7 @@ impl Game {
                 self.fx.render(&self.world, &self.art, 1.5);
                 let secs = self.run_time as u32;
                 let lines = vec![
-                    if self.game_mode == GameMode::Campaign { "ALL 30 STATIONS. ALL THE WAY AROUND.".to_string() } else { "THE LAST TRAIN IS YOURS".to_string() },
+                    if self.game_mode == GameMode::Campaign { format!("ALL 30 STATIONS.   +{} COINS   BANK {}", self.run_coins, self.meta.bank) } else { "THE LAST TRAIN IS YOURS".to_string() },
                     format!("{} KILLS", self.world.total_kills),
                     format!("TIME {}:{:02}", secs / 60, secs % 60),
                 ];
@@ -840,6 +873,32 @@ async fn main() {
                 it.setup_aftermath(&mut game.world);
             }
         }
+        if d.scene == "smash" || d.scene == "akiba_dead" {
+            game.game_mode = GameMode::Campaign;
+            game.camp.has_light = true;
+            game.camp.light_on = true;
+            game.start_loop(0);
+            game.world.msg = None;
+            if d.scene == "smash" {
+                // stand in front of a vending machine
+                if let Some(pr) = game.world.map.props.iter().find(|p| matches!(p.kind, level::PropKind::Vending(_)) && p.hp > 0.0) {
+                    let c = pr.pos + pr.size * 0.5;
+                    game.world.player.pos = c + vec2(0.4, 2.4);
+                    game.world.cam = iso(c.x, c.y);
+                }
+                game.world.zombies.clear();
+                game.world.max_alive_override(0);
+            } else {
+                game.world.player.hp = 1.0;
+                game.world.player.iframes = 0.0;
+                game.world.has_gun = false;
+                game.world.coins = 37;
+                for k in 0..5 {
+                    let p = game.world.player.pos + vec2(1.0 + k as f32 * 0.3, 0.4);
+                    game.world.add_zombie(ZKind::Walker, p);
+                }
+            }
+        }
         if d.scene == "akiba" || d.scene == "akiba_clear" {
             game.camp.has_light = true;
             game.camp.light_on = true;
@@ -919,7 +978,24 @@ async fn main() {
         let (dt, scripted) = match &dbg {
             Some(d) => {
                 let t = frame as f32 / 60.0;
-                let c = if d.auto && game.intro.is_some() {
+                let c = if d.scene == "smash" {
+                    let w = &game.world;
+                    let p = w.player.pos;
+                    let mut c = Controls::default();
+                    if let Some(pr) = w.map.props.iter().filter(|q| q.hp > 0.0 && !q.broken).min_by(|a, b| (a.pos - p).length().partial_cmp(&(b.pos - p).length()).unwrap()) {
+                        let t = pr.pos + pr.size * 0.5;
+                        if t.distance(p) < 6.0 {
+                            c.aim = Some(world_to_screen_dir(t - p).normalize_or_zero());
+                            c.fire = true;
+                        }
+                    }
+                    if let Some(k) = w.pickups.iter().find(|k| matches!(k.kind, PickupKind::Coin(_))) {
+                        if frame > 200 {
+                            c.mv = world_to_screen_dir(k.pos - p).normalize_or_zero();
+                        }
+                    }
+                    Some(c)
+                } else if d.auto && game.intro.is_some() {
                     Some(intro_autopilot(&mut game, frame))
                 } else if d.auto {
                     let mut c = Controls { mv: vec2((t * 0.45).cos(), (t * 0.62).sin()) * 0.8, auto_aim: true, ..Default::default() };

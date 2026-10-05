@@ -140,7 +140,7 @@ pub fn draw_hud(w: &World, art: &Art, u: f32, defs: &[StationDef], input: &Input
     bar(dx, by, 23.0 * u, 4.0 * u, dk, Color::new(0.35, 0.9, 1.0, 1.0), u);
     let ks = format!("{} KILLS", w.total_kills);
     text(art, &ks, sw - m - text_w(&ks, u), by - 2.0 * u, u, DIM);
-    if w.story && w.coins > 0 && false {
+    if w.story {
         let cs = format!("{}", w.coins);
         let cx = sw - m - text_w(&cs, 2.0 * u);
         let cy = by - 22.0 * u;

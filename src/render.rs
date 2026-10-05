@@ -363,7 +363,7 @@ fn draw_sorted(w: &World, art: &Art, view: Rect) {
     let inview = |p: Vec2| view.contains(iso(p.x, p.y));
     for (i, pr) in w.map.props.iter().enumerate() {
         let c = pr.pos + pr.size * 0.5;
-        if inview(c) {
+        if inview(c) && !pr.broken {
             items.push((c.x + c.y, Item::Prop(i)));
         }
     }
@@ -464,7 +464,12 @@ fn draw_sorted(w: &World, art: &Art, view: Rect) {
                 let gz = w.map.ground_z(k.pos);
                 shadow(art, iso3(k.pos.x, k.pos.y, gz), 0.7);
                 let bob = gz + 4.0 + k.z + if k.z <= 0.0 { (k.t * 4.0).sin() * 2.0 } else { 0.0 };
-                if k.kind == PickupKind::Pistol {
+                if let PickupKind::Coin(_) = k.kind {
+                    // a little spinning coin
+                    let at = iso3(k.pos.x, k.pos.y, gz + 3.0 + k.z);
+                    let spin = ((k.t * 8.0 + k.pos.x * 3.0).sin().abs() * 5.0).max(1.0);
+                    draw_texture_ex(&art.tex, (at.x - spin * 0.5).round(), (at.y - 2.5).round(), WHITE, DrawTextureParams { source: Some(art.coin), dest_size: Some(vec2(spin.round(), 5.0)), ..Default::default() });
+                } else if k.kind == PickupKind::Pistol {
                     spr(art, &art.pistol, iso3(k.pos.x, k.pos.y, bob), false, WHITE);
                 } else if k.t < 15.0 || (k.t * 8.0) as i32 % 2 == 0 {
                     spr(art, &art.onigiri, iso3(k.pos.x, k.pos.y, bob), false, WHITE);
@@ -902,7 +907,11 @@ fn draw_lights(w: &World, view: Rect) {
         light_circle(b.pos, 0.9, Color::new(1.0, 0.85, 0.5, 1.0), 0.3);
     }
     for k in &w.pickups {
-        light_circle(k.pos, 1.2, Color::new(0.6, 1.0, 0.7, 1.0), 0.35);
+        if let PickupKind::Coin(_) = k.kind {
+            light_circle(k.pos, 0.6, Color::new(1.0, 0.85, 0.3, 1.0), 0.25);
+        } else {
+            light_circle(k.pos, 1.2, Color::new(0.6, 1.0, 0.7, 1.0), 0.35);
+        }
     }
     // the officer's own flashlight, so you can see his last stand
     for n in &w.npcs {

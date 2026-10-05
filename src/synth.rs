@@ -444,6 +444,28 @@ pub fn retch(seed: u32) -> Vec<f32> {
     b
 }
 
+pub fn smash(seed: u32, glass: bool) -> Vec<f32> {
+    let mut b = buf(if glass { 0.9 } else { 0.4 });
+    let mut r = Rng::new(seed);
+    let (mut lp, mut hp) = (Lp::default(), Hp::default());
+    for (i, s) in b.iter_mut().enumerate() {
+        let t = i as f32 / SR;
+        let n = r.noise();
+        let crunch = lp.run(n, 1800.0) * (-t * 18.0).exp() * 1.4;
+        let thud = (TAU * 90.0 * t).sin() * (-t * 22.0).exp();
+        let shatter = if glass { hp.run(n, 4000.0) * (-t * 6.0).exp() * if r.noise() > 0.3 { 1.0 } else { 0.3 } } else { 0.0 };
+        *s = crunch + thud + shatter;
+    }
+    if glass {
+        for k in 0..8 {
+            bell(&mut b, 0.05 + k as f32 * 0.07, 2600.0 + k as f32 * 340.0, 0.15, 2.7, 0.8, 9.0);
+        }
+    }
+    drive(&mut b, 1.5);
+    normalize(&mut b, 0.85);
+    b
+}
+
 pub fn pew() -> Vec<f32> {
     let mut b = buf(0.14);
     let mut ph = 0.0f32;
@@ -893,6 +915,8 @@ pub enum Id {
     Boom8,
     Coin,
     Attract,
+    Smash,
+    Shatter,
     Hum,
     Music,
     Ambient,
@@ -955,6 +979,9 @@ pub fn bank() -> Vec<(Id, Vec<u8>)> {
     v.push((Id::Boom8, mono(boom8(1900))));
     v.push((Id::Coin, mono(coin())));
     v.push((Id::Attract, mono(attract())));
+    v.push((Id::Smash, mono(smash(2000, false))));
+    v.push((Id::Smash, mono(smash(2001, false))));
+    v.push((Id::Shatter, mono(smash(2100, true))));
     v.push((Id::Hum, mono(hum())));
     let (l, r) = combat_music();
     v.push((Id::Music, wav(&interleave(&l, &r), 2)));

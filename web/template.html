@@ -107,6 +107,21 @@ miniquad_add_plugin({
       }
       return 1;
     };
+    // the coin bank between runs (see src/storage.rs)
+    io.env.sj_store_set = function (ptr, len) {
+      try {
+        var s = new TextDecoder().decode(new Uint8Array(wasm_memory.buffer, ptr, len));
+        localStorage.setItem("last-train-to-shinjuku", s);
+      } catch (e) {}
+    };
+    io.env.sj_store_get = function (ptr, cap) {
+      var s = "";
+      try { s = localStorage.getItem("last-train-to-shinjuku") || ""; } catch (e) {}
+      var b = new TextEncoder().encode(s);
+      var n = Math.min(b.length, cap);
+      new Uint8Array(wasm_memory.buffer, ptr, n).set(b.subarray(0, n));
+      return n;
+    };
     io.env.sj_pad_rumble = function (strong, weak, ms) {
       var p = pads()[active];
       var act = p && p.vibrationActuator;

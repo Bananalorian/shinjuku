@@ -3,6 +3,27 @@
 Every version is one build sprint. Newest first. Versions are tagged in git, and
 each tag publishes a GitHub Release with downloads.
 
+## [0.10.0] - 2026-10-05 - Smash and bank
+
+Sprint 1 of 4: roguelike runs and coins.
+
+### Added
+- **Breakable props in the loop:** vending machines (the jackpot), kiosks, bins,
+  cardboard boxes and abandoned suitcases. Shoot them, or catch them in a grenade
+  blast, until they break: glass shatters, debris flies, vending machines throw
+  cans and sparks, and coins spill out across the floor.
+- **Coins:** they bounce out, get pulled in when you're close, and count up bottom
+  right. Breaking a prop also clears the space it took up.
+- **The bank:** when a run ends (death or victory), its coins go into a bank that's
+  saved between sessions (localStorage in the browser, a small file on desktop).
+  The title screen shows your bank. Next sprint, the bank buys permanent upgrades
+  at the start of each run.
+
+### Changed
+- **The loop is a roguelike:** dying ends the run. The new RUN OVER screen shows
+  stations cleared, kills, coins earned and your bank, then it's back to the title
+  for a fresh run. Arcade still lets you retry a station.
+
 ## [0.9.0] - 2026-10-05 - The loop plays like arcade
 
 ### Changed

@@ -54,8 +54,10 @@ fn mix(id: Id) -> (f32, f64) {
         Id::Retch => (0.6, 1.0),
         Id::Pew => (0.3, 0.05),
         Id::Boom8 => (0.4, 0.05),
-        Id::Coin => (0.5, 0.1),
+        Id::Coin => (0.35, 0.05),
         Id::Attract => (0.45, 2.0),
+        Id::Smash => (0.55, 0.08),
+        Id::Shatter => (0.7, 0.1),
         Id::Zap => (0.35, 0.3),
         _ => (1.0, 0.0),
     }
@@ -134,6 +136,7 @@ impl Audio {
                 Sfx::Retch(p) => self.play(Id::Retch, Self::falloff(world, p)),
                 Sfx::Attract(p) => self.play(Id::Attract, Self::falloff(world, p)),
                 Sfx::Coin => self.play(Id::Coin, 1.0),
+                Sfx::Smash(p, glass) => self.play(if glass { Id::Shatter } else { Id::Smash }, Self::falloff(world, p).max(0.4)),
             }
         }
     }

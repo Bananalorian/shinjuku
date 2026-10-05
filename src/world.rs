@@ -138,6 +138,7 @@ pub struct Pickup {
 pub enum PickupKind {
     Onigiri,
     Pistol,
+    Coin(u32),
 }
 
 impl Pickup {
@@ -344,6 +345,7 @@ pub enum Sfx {
     Retch(Vec2),
     Attract(Vec2),
     Coin,
+    Smash(Vec2, bool),
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -1193,6 +1195,11 @@ impl World {
                     break;
                 }
                 b.pos += step;
+                if let Some(pi) = self.map.breakable_at(b.pos) {
+                    self.hit_prop(pi, b.dmg, dir);
+                    alive = false;
+                    break;
+                }
                 if self.map.solid_at(b.pos) {
                     self.sfx.push(Sfx::Tick(b.pos));
                     for _ in 0..6 {
@@ -1294,6 +1301,16 @@ impl World {
             emit(&mut self.particles, particle(PK::Debris, at, 4.0, vec3(d.x * sp, d.y * sp, rnd(100.0, 220.0)), rnd(1.0, 2.0), 2.0, Color::new(0.35, 0.33, 0.3, 1.0)));
         }
         let dmg = 14.0 * self.stats.dmg;
+        let near: Vec<usize> = (0..self.map.props.len())
+            .filter(|&i| {
+                let pr = &self.map.props[i];
+                pr.hp > 0.0 && !pr.broken && (pr.pos + pr.size * 0.5).distance(at) < r + 0.5
+            })
+            .collect();
+        for pi in near {
+            let c = self.map.props[pi].pos + self.map.props[pi].size * 0.5;
+            self.hit_prop(pi, dmg, (c - at).normalize_or_zero());
+        }
         let hits: Vec<(usize, f32, Vec2)> = self
             .zombies
             .iter()
@@ -1328,6 +1345,13 @@ impl World {
                     k.vel *= 0.4;
                 }
             }
+            if let PickupKind::Coin(_) = k.kind {
+                // coins get pulled in when you're close
+                let d = ppos - k.pos;
+                if d.length() < 2.6 && k.z <= 0.5 && k.t > 0.35 {
+                    k.pos += d.normalize_or_zero() * (7.0 * dt).min(d.length());
+                }
+            }
             let reach = if k.kind == PickupKind::Pistol { 0.8 } else { 0.65 };
             if k.pos.distance(ppos) < reach && k.z < 6.0 && self.phase != Phase::Dead {
                 got.push(i);
@@ -1336,6 +1360,11 @@ impl World {
         for &i in got.iter().rev() {
             let k = self.pickups.swap_remove(i);
             let at = k.pos;
+            if let PickupKind::Coin(v) = k.kind {
+                self.coins += v;
+                self.sfx.push(Sfx::Coin);
+                continue;
+            }
             self.sfx.push(Sfx::Pickup);
             match k.kind {
                 PickupKind::Onigiri => self.player.hp = (self.player.hp + 25.0).min(maxhp),
@@ -1343,6 +1372,7 @@ impl World {
                     self.has_gun = true;
                     self.events.push(Event::GotPistol);
                 }
+                PickupKind::Coin(_) => {}
             }
             for _ in 0..14 {
                 let d = rand_dir();
@@ -1350,7 +1380,7 @@ impl World {
             }
             self.lights.push(TempLight { pos: at, radius: 2.0, color: Color::new(0.5, 1.0, 0.6, 1.0), life: 0.4, max: 0.4 });
         }
-        self.pickups.retain(|k| k.t < 18.0 || k.kind == PickupKind::Pistol);
+        self.pickups.retain(|k| k.t < 18.0 || k.kind != PickupKind::Onigiri);
     }
 
     /// Campaign: zombies already shambling around the level when you arrive.
@@ -1422,6 +1452,69 @@ impl World {
             self.floaters.push((pos, "NOTHING".to_string(), 0.0, Color::new(0.6, 0.6, 0.65, 1.0)));
         }
         light
+    }
+
+    /// Debug: stop new zombies arriving.
+    pub fn max_alive_override(&mut self, n: usize) {
+        self.max_alive = n;
+        self.spawn_rate = (0.0, 0.0);
+    }
+
+    /// A round (or a blast) hits something breakable.
+    pub fn hit_prop(&mut self, pi: usize, dmg: f32, dir: Vec2) {
+        let pr = self.map.props[pi];
+        let c = pr.pos + pr.size * 0.5;
+        let glass = matches!(pr.kind, PropKind::Vending(_) | PropKind::Kiosk);
+        for _ in 0..4 {
+            let d = (-dir + rand_dir() * 0.8).normalize_or_zero();
+            let col = if glass { Color::new(0.8, 0.9, 1.0, 1.0) } else { Color::new(0.7, 0.6, 0.45, 1.0) };
+            emit(&mut self.particles, particle(PK::Debris, c - dir * 0.3, rnd(4.0, 16.0), vec3(d.x * rnd(1.0, 3.0), d.y * rnd(1.0, 3.0), rnd(40.0, 110.0)), rnd(0.6, 1.2), 1.0, col));
+        }
+        if self.map.damage_prop(pi, dmg) {
+            self.break_prop(pi, dir);
+        } else {
+            self.sfx.push(Sfx::Tick(c));
+        }
+    }
+
+    fn break_prop(&mut self, pi: usize, dir: Vec2) {
+        let pr = self.map.props[pi];
+        let c = pr.pos + pr.size * 0.5;
+        let glass = matches!(pr.kind, PropKind::Vending(_) | PropKind::Kiosk);
+        self.sfx.push(Sfx::Smash(c, glass));
+        self.shake = (self.shake + if glass { 0.25 } else { 0.1 }).min(1.0);
+        let n = if glass { 30 } else { 14 };
+        for _ in 0..n {
+            let d = (dir * 0.5 + rand_dir()).normalize_or_zero();
+            let sp = rnd(1.5, 5.0);
+            let col = if glass && chance(0.5) {
+                Color::new(0.75, 0.9, 1.0, 1.0)
+            } else if matches!(pr.kind, PropKind::Vending(_)) && chance(0.4) {
+                [Color::new(0.9, 0.2, 0.2, 1.0), Color::new(0.2, 0.5, 0.95, 1.0), Color::new(0.95, 0.75, 0.2, 1.0)][rand::gen_range(0, 3)]
+            } else {
+                Color::new(0.55, 0.5, 0.45, 1.0)
+            };
+            emit(&mut self.particles, particle(PK::Debris, c, rnd(4.0, 22.0), vec3(d.x * sp, d.y * sp, rnd(60.0, 200.0)), rnd(0.8, 1.8), rnd(1.0, 2.0), col));
+        }
+        if glass {
+            for _ in 0..12 {
+                let d = rand_dir();
+                emit(&mut self.particles, particle(PK::Spark, c, 14.0, vec3(d.x * rnd(1.0, 4.0), d.y * rnd(1.0, 4.0), rnd(20.0, 120.0)), rnd(0.2, 0.5), 1.0, Color::new(0.7, 0.9, 1.0, 1.0)));
+            }
+            self.lights.push(TempLight { pos: c, radius: 2.4, color: Color::new(0.7, 0.85, 1.0, 1.0), life: 0.15, max: 0.15 });
+        }
+        // coins spill out
+        let total = pr.coins();
+        let pieces = (total as f32 / 2.0).ceil().max(1.0) as u32;
+        for k in 0..pieces {
+            let v = if k + 1 == pieces { total - 2 * (pieces - 1) } else { 2 }.max(1);
+            let d = rand_dir();
+            let mut pk = Pickup::new(c, PickupKind::Coin(v));
+            pk.z = 10.0;
+            pk.vz = rnd(80.0, 160.0);
+            pk.vel = d * rnd(1.0, 3.0);
+            self.pickups.push(pk);
+        }
     }
 
     /// Fire a bullet from anyone (the officer in the opening).

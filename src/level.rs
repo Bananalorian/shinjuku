@@ -326,6 +326,15 @@ pub struct Obstacle {
     pub max: Vec2,
     /// Waist-high: blocks walking but bullets fly over it.
     pub low: bool,
+    /// False once the prop it belongs to has been smashed.
+    pub alive: bool,
+    pub prop: Option<usize>,
+}
+
+impl Obstacle {
+    pub fn new(min: Vec2, max: Vec2, low: bool) -> Self {
+        Obstacle { min, max, low, alive: true, prop: None }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -408,6 +417,27 @@ pub struct Prop {
     pub kind: PropKind,
     pub pos: Vec2, // min corner in world tiles
     pub size: Vec2,
+    /// Hit points if it can be smashed (0 = solid scenery).
+    pub hp: f32,
+    pub broken: bool,
+    pub obstacle: Option<usize>,
+}
+
+impl Prop {
+    pub fn new(kind: PropKind, pos: Vec2, size: Vec2) -> Self {
+        Prop { kind, pos, size, hp: 0.0, broken: false, obstacle: None }
+    }
+    /// Coins inside, by kind (vending machines are the jackpot).
+    pub fn coins(&self) -> u32 {
+        match self.kind {
+            PropKind::Vending(_) => 12,
+            PropKind::Kiosk => 20,
+            PropKind::Boxes => 4,
+            PropKind::Suitcase(_) => 5,
+            PropKind::Bin => 2,
+            _ => 0,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -514,10 +544,10 @@ impl Map {
         let mut lights = Vec::new();
         let add_prop = |kind: PropKind, center: Vec2, size: Vec2, solid: bool, props: &mut Vec<Prop>, obstacles: &mut Vec<Obstacle>| {
             let pos = center - size * 0.5;
-            props.push(Prop { kind, pos, size });
+            props.push(Prop::new(kind, pos, size));
             if solid {
                 let low = matches!(kind, PropKind::Bench | PropKind::Gate | PropKind::Bin);
-                obstacles.push(Obstacle { min: pos, max: pos + size, low });
+                obstacles.push(Obstacle::new(pos, pos + size, low));
             }
         };
 
@@ -533,8 +563,8 @@ impl Map {
             while x + 1.0 <= w as f32 - 0.3 {
                 if !in_gap(x) {
                     for y in [1.0f32, h as f32 - 0.55] {
-                        props.push(Prop { kind: PropKind::CarSeat, pos: vec2(x, y), size: vec2(1.0, 0.55) });
-                        obstacles.push(Obstacle { min: vec2(x, y), max: vec2(x + 1.0, y + 0.55), low: true });
+                        props.push(Prop::new(PropKind::CarSeat, vec2(x, y), vec2(1.0, 0.55)));
+                        obstacles.push(Obstacle::new(vec2(x, y), vec2(x + 1.0, y + 0.55), true));
                     }
                 }
                 x += 1.0;
@@ -542,20 +572,20 @@ impl Map {
             let mut x = 0.5;
             while x + 0.5 <= w as f32 {
                 let door = gaps.iter().any(|(a, b)| x + 0.25 > *a && x + 0.25 < *b);
-                props.push(Prop { kind: if door { PropKind::CarDoor } else { PropKind::CarWall }, pos: vec2(x, h as f32 - 0.02), size: vec2(0.5, 0.1) });
+                props.push(Prop::new(if door { PropKind::CarDoor } else { PropKind::CarWall }, vec2(x, h as f32 - 0.02), vec2(0.5, 0.1)));
                 x += 0.5;
             }
             for y in [2.2f32, h as f32 - 1.6] {
                 let mut x = 0.5;
                 while x + 1.0 <= w as f32 {
-                    props.push(Prop { kind: PropKind::Straps, pos: vec2(x, y), size: vec2(1.0, 0.05) });
+                    props.push(Prop::new(PropKind::Straps, vec2(x, y), vec2(1.0, 0.05)));
                     x += 1.0;
                 }
             }
             let mut x = 1.2;
             let mut n = 0;
             while x + 1.1 < w as f32 {
-                props.push(Prop { kind: PropKind::Ad(n % 3), pos: vec2(x, 3.4), size: vec2(1.1, 0.04) });
+                props.push(Prop::new(PropKind::Ad(n % 3), vec2(x, 3.4), vec2(1.1, 0.04)));
                 n += 1;
                 x += 2.6;
             }
@@ -571,8 +601,8 @@ impl Map {
             // an arcade cabinet in the corner of the middle platform
             if let Some((_, y0, y1)) = band_ranges.iter().find(|b| b.0 == Band::Platform && b.1 > 1) {
                 let c = vec2(2.1, (*y0 + *y1) as f32 * 0.5 - 0.35);
-                props.push(Prop { kind: PropKind::Cabinet, pos: c - vec2(0.4, 0.35), size: vec2(0.8, 0.7) });
-                obstacles.push(Obstacle { min: c - vec2(0.4, 0.35), max: c + vec2(0.4, 0.35), low: false });
+                props.push(Prop::new(PropKind::Cabinet, c - vec2(0.4, 0.35), vec2(0.8, 0.7)));
+                obstacles.push(Obstacle::new(c - vec2(0.4, 0.35), c + vec2(0.4, 0.35), false));
                 arcade = Some(c + vec2(0.0, 0.9));
                 lights.push(LightDef { pos: c + vec2(0.0, 1.0), radius: 2.0, color: rgb(140, 120, 255), flicker: 0.0, phase: 0.0, strobe: false });
             }
@@ -678,8 +708,8 @@ impl Map {
                 let hall_b = (row1 + 5, bottom);
                 let wall = |tx: i32, ty: i32, props: &mut Vec<Prop>, obstacles: &mut Vec<Obstacle>| {
                     let kind = ((tx * 7 + ty * 13).rem_euclid(5) as usize).min(2);
-                    props.push(Prop { kind: PropKind::MazeWall(kind), pos: vec2(tx as f32, ty as f32), size: vec2(1.0, 1.0) });
-                    obstacles.push(Obstacle { min: vec2(tx as f32, ty as f32), max: vec2(tx as f32 + 1.0, ty as f32 + 1.0), low: false });
+                    props.push(Prop::new(PropKind::MazeWall(kind), vec2(tx as f32, ty as f32), vec2(1.0, 1.0)));
+                    obstacles.push(Obstacle::new(vec2(tx as f32, ty as f32), vec2(tx as f32 + 1.0, ty as f32 + 1.0), false));
                 };
                 // the passage walls, with a wide opening into every hall
                 let mut cuts = vec![1];
@@ -757,13 +787,13 @@ impl Map {
                     let in_gap = doors.iter().any(|d| (x + 0.25 - d).abs() < 0.6);
                     if end || in_gap {
                         if let Some(x0) = run.take() {
-                            obstacles.push(Obstacle { min: vec2(x0, panel_y), max: vec2(x, panel_y + 0.16), low: true });
+                            obstacles.push(Obstacle::new(vec2(x0, panel_y), vec2(x, panel_y + 0.16), true));
                         }
                         if end {
                             break;
                         }
                     } else {
-                        props.push(Prop { kind: PropKind::Psd, pos: vec2(x, panel_y), size: vec2(0.5, 0.16) });
+                        props.push(Prop::new(PropKind::Psd, vec2(x, panel_y), vec2(0.5, 0.16)));
                         run.get_or_insert(x);
                     }
                     x += 0.5;
@@ -791,7 +821,7 @@ impl Map {
                 let led = k_sign % 2 == 1;
                 let (spr, kind) = if led { (signs.led[0], PropKind::SignLed) } else { (signs.name, PropKind::SignName) };
                 let fx = (spr.r.w - spr.anchor.x) / HALF_W; // footprint length from the sprite
-                props.push(Prop { kind, pos: vec2(x, yc), size: vec2(fx.max(1.0), 0.12) });
+                props.push(Prop::new(kind, vec2(x, yc), vec2(fx.max(1.0), 0.12)));
                 k_sign += 1;
                 x += 12.0;
             }
@@ -825,8 +855,8 @@ impl Map {
             let c = vec2(rng.range(4.0, w as f32 - 5.0), 1.85);
             let half = vec2(1.1, 0.5);
             if free(c, half, &obstacles, &props) {
-                props.push(Prop { kind: PropKind::Kiosk, pos: c - half, size: half * 2.0 });
-                obstacles.push(Obstacle { min: c - half, max: c + half, low: false });
+                props.push(Prop::new(PropKind::Kiosk, c - half, half * 2.0));
+                obstacles.push(Obstacle::new(c - half, c + half, false));
                 lights.push(LightDef { pos: c + vec2(0.0, 1.0), radius: 2.6, color: rgb(255, 236, 190), flicker: 0.0, phase: 0.0, strobe: false });
                 break;
             }
@@ -848,8 +878,8 @@ impl Map {
                 (PropKind::Barrier, vec2(0.5, 0.07))
             };
             if free(c, half, &obstacles, &props) {
-                props.push(Prop { kind, pos: c - half, size: half * 2.0 });
-                obstacles.push(Obstacle { min: c - half, max: c + half, low: true });
+                props.push(Prop::new(kind, c - half, half * 2.0));
+                obstacles.push(Obstacle::new(c - half, c + half, true));
                 placed += 1;
             }
         }
@@ -994,7 +1024,7 @@ impl Map {
         }
         for &i in &self.obs_grid[(ty * self.gw + tx) as usize] {
             let o = self.obstacles[i as usize];
-            if smash_low && o.low {
+            if (smash_low && o.low) || !o.alive {
                 continue;
             }
             let c = vec2(p.x.clamp(o.min.x, o.max.x), p.y.clamp(o.min.y, o.max.y));
@@ -1035,11 +1065,80 @@ impl Map {
         }
         for &i in &self.obs_grid[(ty * self.gw + tx) as usize] {
             let o = self.obstacles[i as usize];
-            if !o.low && p.x >= o.min.x && p.x <= o.max.x && p.y >= o.min.y && p.y <= o.max.y {
+            if o.alive && !o.low && p.x >= o.min.x && p.x <= o.max.x && p.y >= o.min.y && p.y <= o.max.y {
                 return true;
             }
         }
         false
+    }
+
+    /// Make the vending machines, kiosks, bins, boxes and luggage breakable.
+    pub fn enable_breakables(&mut self) {
+        for pi in 0..self.props.len() {
+            let pr = self.props[pi];
+            let hp = match pr.kind {
+                PropKind::Vending(_) => 10.0,
+                PropKind::Kiosk => 24.0,
+                PropKind::Boxes => 4.0,
+                PropKind::Suitcase(_) => 3.0,
+                PropKind::Bin => 3.0,
+                _ => 0.0,
+            };
+            if hp <= 0.0 {
+                continue;
+            }
+            if let Some(oi) = self.obstacles.iter().position(|o| (o.min - pr.pos).length() < 0.01 && (o.max - (pr.pos + pr.size)).length() < 0.01) {
+                self.obstacles[oi].prop = Some(pi);
+                self.props[pi].obstacle = Some(oi);
+                self.props[pi].hp = hp;
+            }
+        }
+    }
+
+    /// A breakable prop under this point, if any (bullets hit even the low ones).
+    pub fn breakable_at(&self, p: Vec2) -> Option<usize> {
+        let (tx, ty) = (p.x.floor() as i32, p.y.floor() as i32);
+        if tx < 0 || ty < 0 || tx >= self.gw || ty >= self.gh {
+            return None;
+        }
+        for &i in &self.obs_grid[(ty * self.gw + tx) as usize] {
+            let o = self.obstacles[i as usize];
+            if o.alive && o.prop.is_some() && p.x >= o.min.x && p.x <= o.max.x && p.y >= o.min.y && p.y <= o.max.y {
+                return o.prop;
+            }
+        }
+        None
+    }
+
+    /// Damage a prop; returns true if that broke it.
+    pub fn damage_prop(&mut self, pi: usize, dmg: f32) -> bool {
+        let pr = &mut self.props[pi];
+        if pr.broken || pr.hp <= 0.0 {
+            return false;
+        }
+        pr.hp -= dmg;
+        if pr.hp > 0.0 {
+            return false;
+        }
+        pr.broken = true;
+        let (pos, size) = (pr.pos, pr.size);
+        if let Some(oi) = pr.obstacle {
+            self.obstacles[oi].alive = false;
+        }
+        // the space it filled is walkable again
+        for ty in (pos.y.floor() as i32 - 1)..=((pos.y + size.y).floor() as i32 + 1) {
+            for tx in (pos.x.floor() as i32 - 1)..=((pos.x + size.x).floor() as i32 + 1) {
+                if tx < 1 || ty < 1 || tx >= self.gw || ty >= self.gh {
+                    continue;
+                }
+                let c = vec2(tx as f32 + 0.5, ty as f32 + 0.5);
+                let still = self.obstacles.iter().any(|o| o.alive && c.x > o.min.x - 0.15 && c.x < o.max.x + 0.15 && c.y > o.min.y - 0.15 && c.y < o.max.y + 0.15);
+                self.blocked[(ty * self.gw + tx) as usize] = still;
+            }
+        }
+        self.flow_cell = (-1, -1);
+        self.stamp(pos + size * 0.5, (size.x + size.y) * 0.35, 1);
+        true
     }
 
     #[allow(dead_code)]
