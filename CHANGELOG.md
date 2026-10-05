@@ -3,6 +3,13 @@
 Every version is one build sprint. Newest first. Versions are tagged in git, and
 each tag publishes a GitHub Release with downloads.
 
+## [0.8.1] - 2026-10-05 - Arcade is back
+
+### Changed
+- **Arcade returns to the title menu, exactly as it was:** five stations from
+  Akihabara to Shinjuku, the auto rifle, the flashlight from the start, and an
+  upgrade card on every train ride. NEW GAME is the opening plus the loop.
+
 ## [0.8.0] - 2026-10-05 - The loop
 
 ### Changed

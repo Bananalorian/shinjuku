@@ -7,6 +7,9 @@ on a crowded Yamanote line train that pulls into Kanda just as everything goes
 wrong. Then the last person in the line's operations center asks you to clear
 every station on the loop, one by one, all the way around and back to Akihabara.
 
+There's also **Arcade** on the title menu: the original quick run of five stations
+from Akihabara to Shinjuku, with an upgrade card on every train ride.
+
 **[▶ Play in your browser](https://bananalorian.github.io/shinjuku/)** ·
 **[Download for Windows, macOS, Linux](https://github.com/Bananalorian/shinjuku/releases/latest)** ·
 [Changelog](CHANGELOG.md)

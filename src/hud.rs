@@ -228,7 +228,7 @@ pub fn draw_title(art: &Art, u: f32, t: f32, defs: &[StationDef], mode: Mode, se
         text_c(art, opts, sw * 0.5, sh * 0.62 + 11.0 * u, fit(opts, u, sw * 0.92), DIM);
     }
     // the menu
-    let items = [("NEW GAME", "FROM KANDA, ALL THE WAY AROUND THE YAMANOTE LOOP")];
+    let items = [("NEW GAME", "FROM KANDA, ALL THE WAY AROUND THE YAMANOTE LOOP"), ("ARCADE", "THE ORIGINAL RUN: 5 STATIONS, UPGRADE CARDS")];
     let mut rects = Vec::new();
     for (i, (name, desc)) in items.iter().enumerate() {
         let y = sh * 0.73 + i as f32 * 18.0 * u;

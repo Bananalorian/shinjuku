@@ -164,8 +164,7 @@ impl Game {
         self.start_station(0);
     }
 
-    /// The original five-station run with upgrade cards (kept for reference; not on the menu).
-    #[allow(dead_code)]
+    /// Arcade: the original five-station run, Akihabara to Shinjuku, with upgrade cards.
     fn start_arcade(&mut self) {
         self.game_mode = GameMode::Arcade;
         self.stats = Stats::arcade();
@@ -321,7 +320,10 @@ impl Game {
                 let center = iso(self.world.map.w as f32 * 0.5, self.world.map.h as f32 * 0.5);
                 self.world.cam = center + vec2((t * 0.12).sin() * 140.0, (t * 0.09).cos() * 50.0);
                 self.fx.render(&self.world, &self.art, 1.25);
-                self.menu_sel = 0;
+                if ui.nav.y != 0 {
+                    self.menu_sel = (self.menu_sel as i32 + ui.nav.y).rem_euclid(2) as usize;
+                    self.audio.play(Id::Select, 0.5);
+                }
                 let rects = hud::draw_title(&self.art, u, t, &self.defs, mode, self.menu_sel);
                 if mode == Mode::Mouse {
                     let m: Vec2 = mouse_position().into();
@@ -339,7 +341,7 @@ impl Game {
                 }
                 if go {
                     self.audio.play(Id::Select, 1.0);
-                    self.start_intro();
+                    if self.menu_sel == 0 { self.start_intro(); } else { self.start_arcade(); }
                 }
             }
             Scene::Intro => {
@@ -855,6 +857,9 @@ async fn main() {
             }
         }
         if let Some(s) = d.station {
+            // SJ_STATION means arcade mode (the original stations, with cards)
+            game.game_mode = GameMode::Arcade;
+            game.stats = Stats::arcade();
             game.start_station(s);
             game.fade = 0.0;
             match d.scene.as_str() {
