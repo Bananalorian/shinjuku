@@ -21,6 +21,7 @@ pub enum Stage {
     Blackout,
     Wake,
     Explore,
+    Notice,
     Turn,
     Charge,
     DashPrompt,
@@ -76,7 +77,9 @@ pub struct Intro {
     explore_t: f32,
     leaving: bool,
     pub skip_hold: f32,
-    vomiter: Option<Vec2>,
+    pub vomiter: Option<Vec2>,
+    flee_phase: u8,
+    flee_t: f32,
     turned: Option<u32>,
     flee_target: Vec2,
     officer: Option<usize>,
@@ -151,6 +154,8 @@ impl Intro {
             leaving: false,
             skip_hold: 0.0,
             vomiter: None,
+            flee_phase: 0,
+            flee_t: 0.0,
             turned: None,
             flee_target: Vec2::ZERO,
             officer: None,
@@ -267,7 +272,9 @@ impl Intro {
             w.map.stamp(p, rnd(0.5, 0.9), 2);
             placed += 1;
         }
-        let v = vec2(2.6, edge + 2.4);
+        let back_edge = w.map.track_ys.first().map(|y| y - 1.5).unwrap_or(6.0);
+        let mut v = vec2(2.0, (back_edge * 0.45).max(2.4));
+        w.map.resolve(&mut v, 0.35, true);
         let mut n = Npc::new(v, 1, NpcState::Kneel);
         n.face_left = true;
         w.npcs.push(n);
@@ -497,7 +504,29 @@ impl Intro {
                     if chance(dt * 6.0) {
                         w.vomit(v + vec2(-0.2, 0.1), vec2(-0.6, 0.4));
                     }
-                    if w.player.pos.distance(v) < 4.6 {
+                    // a dying tube flickers over the corner, so you can just make them out
+                    if chance(0.7) {
+                        w.lights.push(TempLight { pos: v + vec2(0.6, 0.6), radius: 2.2, color: Color::new(0.85, 0.9, 1.0, 1.0), life: 0.05, max: 0.1 });
+                    }
+                    if self.t > 15.0 && self.objective == Some("LOOK AROUND") {
+                        self.objective = Some("THAT SOUND... THE FAR PLATFORM?");
+                    }
+                    // wandering the far platform, in front of the track entrances, you see someone in the corner
+                    let back_edge = w.map.track_ys.first().map(|y| y - 1.5).unwrap_or(6.0);
+                    if w.player.pos.y < back_edge - 0.6 && w.player.pos.distance(v) < 8.5 {
+                        w.locked = true;
+                        w.player.vel = Vec2::ZERO;
+                        w.player.aim_screen = world_to_screen_dir(v - w.player.pos).normalize_or_zero();
+                        self.objective = None;
+                        self.say("YOU", "HELLO? ARE YOU OKAY?");
+                        self.go(Stage::Notice);
+                    }
+                }
+            }
+            Stage::Notice => {
+                if let Some(v) = self.vomiter {
+                    w.lights.push(TempLight { pos: v + vec2(0.6, 0.6), radius: 2.2, color: Color::new(0.85, 0.9, 1.0, 1.0), life: 0.05, max: 0.1 });
+                    if self.t > 2.6 {
                         // they stop retching, and look up at you
                         w.npcs.retain(|n| n.state != NpcState::Kneel);
                         w.add_zombie(ZKind::Runner, v);
@@ -508,7 +537,6 @@ impl Intro {
                             self.turned = Some(z.id);
                         }
                         w.sfx.push(Sfx::Scream(v));
-                        self.say("???", "...HHHRRK...");
                         self.go(Stage::Turn);
                     }
                 }
@@ -516,8 +544,8 @@ impl Intro {
             Stage::Turn => {
                 if let Some(z) = self.turned.and_then(|id| w.zombies.iter_mut().find(|z| z.id == id)) {
                     z.attack_cd = 9.0;
-                    if self.t > 1.3 {
-                        z.speed = 4.4;
+                    if self.t > 1.0 {
+                        z.speed = 4.6;
                         self.go(Stage::Charge);
                     }
                 }
@@ -536,23 +564,24 @@ impl Intro {
                 }
             }
             Stage::DashPrompt => {
+                w.locked = false;
                 if ctl.dash {
                     w.freeze = false;
                     self.prompt = None;
                     if ctl.mv.length() < 0.2 {
-                        // dash sideways, away from the lunge
+                        // dash along the platform, out of the line of its lunge
                         if let Some(z) = self.turned.and_then(|id| w.zombies.iter().find(|z| z.id == id)) {
-                            let away = w.player.pos - z.pos;
-                            let side = vec2(-away.y, away.x).normalize_or_zero();
+                            let side = if w.player.pos.x >= z.pos.x { vec2(1.0, 0.0) } else { vec2(-1.0, 0.0) };
                             ctl.mv = world_to_screen_dir(side).normalize_or_zero();
                         }
                     }
-                    // the infected stumbles past and bolts for the tracks
-                    let ty = *w.map.track_ys.last().unwrap_or(&18.5);
-                    if let Some(z) = self.turned.and_then(|id| w.zombies.iter().find(|z| z.id == id)) {
-                        let gap = door_xs(w.map.w).into_iter().min_by(|a, b| (a - z.pos.x).abs().partial_cmp(&(b - z.pos.x).abs()).unwrap()).unwrap_or(4.5);
-                        self.flee_target = vec2(gap, ty);
-                    }
+                    // its lunge carries it past you, through the nearest gap and out onto the tracks
+                    let ty = *w.map.track_ys.first().unwrap_or(&7.5);
+                    let px = w.player.pos.x;
+                    let gap = door_xs(w.map.w).into_iter().min_by(|a, b| (a - px).abs().partial_cmp(&(b - px).abs()).unwrap()).unwrap_or(4.5);
+                    self.flee_target = vec2(gap, ty);
+                    self.flee_phase = 0;
+                    self.flee_t = 0.0;
                     self.go(Stage::Flee);
                 } else {
                     // keep the world frozen until they press dash
@@ -561,37 +590,81 @@ impl Intro {
             }
             Stage::Flee => {
                 let target = self.flee_target;
+                let mouth = vec2(target.x, target.y - 2.1); // the platform side of the gap
                 let mut alive = false;
-                let mut on_track = false;
+                self.flee_t += dt;
+                if self.t > 0.6 {
+                    w.locked = true; // you watch what happens next
+                    w.player.vel *= 0.8;
+                }
+                let mut say: Option<&str> = None;
+                let mut train = false;
                 if let Some(z) = self.turned.and_then(|id| w.zombies.iter_mut().find(|z| z.id == id)) {
                     alive = true;
                     z.attack_cd = 9.0;
                     z.speed = 0.0; // the script steers it now
-                    if self.t > 0.35 {
-                        // first to the gap in the screen doors, then out onto the rails
-                        let mouth = vec2(target.x, target.y + 2.1);
-                        if z.pos.y < mouth.y + 0.05 || z.pos.distance(mouth) < 0.2 {
-                            self.leaving = true;
-                        }
-                        let goal = if self.leaving { target } else { mouth };
+                    let on_rails = (z.pos.y - target.y).abs() < 0.45;
+                    let mut step = |goal: Vec2, sp: f32| {
                         let d = goal - z.pos;
-                        if d.length() > 0.1 {
-                            z.pos += d.normalize() * (4.2 * dt).min(d.length());
-                            z.vel = d.normalize() * 4.2;
+                        if d.length() > 0.05 {
+                            z.pos += d.normalize() * (sp * dt).min(d.length());
+                            z.vel = d.normalize() * sp;
                         } else {
                             z.vel = Vec2::ZERO;
                         }
-                        on_track = (z.pos.y - target.y).abs() < 0.8;
+                        d.length()
+                    };
+                    match self.flee_phase {
+                        0 => {
+                            if step(mouth, 4.4) < 0.2 {
+                                self.flee_phase = 1;
+                            }
+                        }
+                        1 => {
+                            if step(target, 4.0) < 0.15 {
+                                self.flee_phase = 2;
+                                self.flee_t = 0.0;
+                                z.vel = Vec2::ZERO;
+                            }
+                        }
+                        2 => {
+                            // it just stops there on the rails
+                            z.vel = Vec2::ZERO;
+                            if self.flee_t > 0.6 && self.flee_t - dt <= 0.6 {
+                                say = Some("OH MY GOD... OH MY GOD...");
+                            }
+                            if self.flee_t > 3.4 {
+                                self.flee_phase = 3;
+                                self.flee_t = 0.0;
+                            }
+                        }
+                        _ => {
+                            // ...then it starts back toward you, one dragging step at a time
+                            if on_rails {
+                                step(mouth, 0.35);
+                            }
+                            if self.flee_t > 0.3 && self.flee_t - dt <= 0.3 {
+                                say = Some("WHAT THE F-");
+                                train = true;
+                            }
+                        }
                     }
                 }
-                if alive && on_track && w.train.is_none() {
-                    // it stands on the rails, staring... and an out-of-service train barrels through
-                    w.spawn_train(target.y, target.x - 28.0, w.map.gw as f32 + 45.0, false, true);
+                if let Some(t) = say {
+                    self.say("YOU", t);
+                }
+                if train && w.train.is_none() {
+                    w.spawn_train(target.y, target.x - 14.0, w.map.gw as f32 + 45.0, false, true);
                     w.sfx.push(Sfx::Horn);
                 }
+                // if the train has been and gone, it got it (a safety net for odd positions)
+                if alive && self.flee_phase == 3 && self.flee_t > 2.5 && w.train.is_none() {
+                    if let Some(i) = self.turned.and_then(|id| w.zombies.iter().position(|z| z.id == id)) {
+                        w.hit_zombie(i, 999.0, vec2(1.0, 0.0));
+                    }
+                }
                 if !alive && w.train.is_none() && self.t > 2.0 {
-                    self.leaving = false;
-                    self.say("YOU", "WHAT IS HAPPENING...?");
+                    w.locked = false;
                     self.objective = Some("EXPLORE THE STATION");
                     self.go(Stage::Wander);
                 }

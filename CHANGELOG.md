@@ -3,6 +3,18 @@
 Every version is one build sprint. Newest first. Versions are tagged in git, and
 each tag publishes a GitHub Release with downloads.
 
+## [0.7.2] - 2026-10-05 - The figure in the corner
+
+### Changed
+- The dash scene moved to the far platform and plays out properly. Exploring up
+  there, in front of the track entrances, you stop: someone's in the corner, under
+  a flickering tube. "HELLO? ARE YOU OKAY?" They turn and rush you; the game
+  freezes for the dash. You dash along the platform, and their lunge carries them
+  straight through the gap and onto the tracks, where they just stop.
+  "OH MY GOD... OH MY GOD..." Then they start back toward you. "WHAT THE F-" and
+  the train takes them.
+- A hint points you at the far platform if you haven't found it after a while.
+
 ## [0.7.1] - 2026-10-05 - Slower opening
 
 ### Changed

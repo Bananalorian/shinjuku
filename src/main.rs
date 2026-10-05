@@ -688,7 +688,9 @@ fn intro_autopilot(game: &mut Game, frame: u32) -> Controls {
             }
         }
         Explore => {
-            c.mv = toward(vec2(2.6, *w.map.track_ys.last().unwrap() + 3.9));
+            if let Some(v) = it.vomiter {
+                c.mv = toward(v + vec2(5.0, 1.5));
+            }
         }
         DashPrompt => c.dash = true,
         Wander => {
