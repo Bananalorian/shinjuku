@@ -3,6 +3,42 @@
 Every version is one build sprint. Newest first. Versions are tagged in git, and
 each tag publishes a GitHub Release with downloads.
 
+## [0.5.0] - 2026-10-05 - The last normal commute
+
+### Added
+- A playable opening, told through play rather than cutscenes:
+  - **On the train.** A crowded Yamanote line car (about 70% full): commuters on
+    the bench and holding straps, the car swaying side to side with everyone
+    swaying with it, braking lurches, tunnel lights streaking past the windows,
+    and announcements with the chime ("The next station is Kanda", a short stop,
+    then "The next station is Akihabara. The doors on the left side will open").
+  - **Akihabara.** The doors open (movement tutorial), the crowd shuffles off, and
+    you follow it to a new escalator.
+  - **The quake.** Halfway up, the ground shakes, the lights fail, people scream,
+    and everything goes black.
+  - **Waking up.** Red emergency lights, bodies on the platform, and someone on
+    their knees being sick in the corner. They look up and charge; the game freezes
+    and teaches you to dash. They bolt for the tracks as an out-of-service train
+    comes through.
+  - **The arcade.** A STAR COMMUTER cabinet glows in the dark: a small shooter you
+    can actually play (free play for now; coins become currency later).
+  - **The officer.** A police officer holds off the infected, gets overrun, and
+    throws you his pistol: "It's too dangerous here... take this!" Kill what got
+    him, emergency power comes back, and the Akihabara fight begins.
+- Hold Esc, Tab or Start (or tap the corner on touch) to skip the opening.
+- Interact: F on keyboard, X on a controller.
+- Commuters, a kneeling pose, sitting and strap-holding poses, the officer, a
+  pistol, an escalator, the arcade cabinet, and a train-car interior with seats,
+  straps, hanging ads and door panels, all generated in code.
+- Sounds: the quake, screams, retching, and arcade blips, coin and attract jingle.
+- NPCs with their own pathfinding fields, pickups that arc through the air, and
+  scripted trains that pass through without stopping.
+
+### Changed
+- You start with a pistol (infinite ammo, slower and harder-hitting) instead of
+  the auto rifle. Upgrades still turn it into something meaner.
+- A moving train now runs down anything on its track instead of shoving it aside.
+
 ## [0.4.0] - 2026-10-04 - Living stations
 
 ### Added

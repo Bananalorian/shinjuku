@@ -49,6 +49,13 @@ fn mix(id: Id) -> (f32, f64) {
         Id::Victory => (0.7, 1.0),
         Id::Select => (0.4, 0.05),
         Id::Caw => (0.45, 0.6),
+        Id::Quake => (1.0, 2.0),
+        Id::Scream => (0.5, 0.4),
+        Id::Retch => (0.6, 1.0),
+        Id::Pew => (0.3, 0.05),
+        Id::Boom8 => (0.4, 0.05),
+        Id::Coin => (0.5, 0.1),
+        Id::Attract => (0.45, 2.0),
         Id::Zap => (0.35, 0.3),
         _ => (1.0, 0.0),
     }
@@ -95,7 +102,7 @@ impl Audio {
 
     fn falloff(world: &World, p: Vec2) -> f32 {
         let d = world.player.pos.distance(p);
-        (1.0 - (d - 3.0) / 18.0).clamp(0.12, 1.0)
+        (1.0 - (d - 3.0) / 18.0).clamp(0.05, 1.0)
     }
 
     /// Turn gameplay events into sounds.
@@ -122,6 +129,10 @@ impl Audio {
                 Sfx::Clear => self.play(Id::Clear, 1.0),
                 Sfx::Caw(p) => self.play(Id::Caw, Self::falloff(world, p)),
                 Sfx::Zap(p) => self.play(Id::Zap, Self::falloff(world, p)),
+                Sfx::Quake => self.play(Id::Quake, 1.0),
+                Sfx::Scream(p) => self.play(Id::Scream, Self::falloff(world, p)),
+                Sfx::Retch(p) => self.play(Id::Retch, Self::falloff(world, p)),
+                Sfx::Attract(p) => self.play(Id::Attract, Self::falloff(world, p)),
             }
         }
     }

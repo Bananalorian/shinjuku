@@ -1,7 +1,7 @@
 //! Station definitions and map building: the baked floor/wall image, props,
 //! lights, spawn points, collision, and the zombie flow field.
 
-use crate::art::{build_signs, Art, SignArt};
+use crate::art::{build_signs, esc_height, Art, SignArt, ESC_SLICES};
 use crate::font;
 use crate::util::*;
 use macroquad::prelude::*;
@@ -43,6 +43,37 @@ pub struct StationDef {
     pub flicker: f32,
     pub boss: bool,
     pub tagline: &'static str,
+    /// The inside of a train car (the opening scene), not a station.
+    pub car: bool,
+    /// Akihabara in the opening: an escalator up to the concourse and an arcade cabinet.
+    pub intro_props: bool,
+}
+
+/// Doors along a car, as x centers (both sides line up).
+pub const CAR_DOORS: [f32; 4] = [3.0, 8.5, 14.0, 19.5];
+
+/// The opening scene: a crowded Yamanote line car between stations.
+pub fn car_def() -> StationDef {
+    StationDef {
+        name: "YAMANOTE LINE",
+        code: "JY",
+        width: 22,
+        bands: vec![(Band::Concourse, 5)],
+        quota: 0,
+        max_alive: 0,
+        spawn_rate: (0.0, 0.0),
+        mix: [1.0, 0.0, 0.0],
+        ambient: Color::new(0.2, 0.2, 0.21, 1.0),
+        wall: rgb(196, 198, 204),
+        floor: rgb(92, 100, 116),
+        lamp: Color::new(1.0, 0.96, 0.88, 1.0),
+        neon: vec![rgb(255, 255, 255)],
+        flicker: 0.0,
+        boss: false,
+        tagline: "",
+        car: true,
+        intro_props: false,
+    }
 }
 
 /// The route: clockwise up the Yamanote line from Akihabara to Shinjuku.
@@ -66,6 +97,8 @@ pub fn stations() -> Vec<StationDef> {
             flicker: 0.12,
             boss: false,
             tagline: "ELECTRIC TOWN. THE NEON NEVER WENT OUT.",
+            car: false,
+            intro_props: true,
         },
         StationDef {
             name: "UENO",
@@ -84,6 +117,8 @@ pub fn stations() -> Vec<StationDef> {
             flicker: 0.2,
             boss: false,
             tagline: "THE PARK GATES ARE SHUT. THEY CAME UP THE STAIRS.",
+            car: false,
+            intro_props: false,
         },
         StationDef {
             name: "IKEBUKURO",
@@ -102,6 +137,8 @@ pub fn stations() -> Vec<StationDef> {
             flicker: 0.25,
             boss: false,
             tagline: "TWO MILLION COMMUTERS A DAY. MOST NEVER LEFT.",
+            car: false,
+            intro_props: false,
         },
         StationDef {
             name: "TAKADANOBABA",
@@ -120,6 +157,8 @@ pub fn stations() -> Vec<StationDef> {
             flicker: 0.5,
             boss: false,
             tagline: "THE LIGHTS ARE DYING. STAY IN THE LIGHT.",
+            car: false,
+            intro_props: false,
         },
         StationDef {
             name: "SHINJUKU",
@@ -149,6 +188,8 @@ pub fn stations() -> Vec<StationDef> {
             flicker: 0.3,
             boss: true,
             tagline: "THE BUSIEST STATION ON EARTH. END OF THE LINE.",
+            car: false,
+            intro_props: false,
         },
     ]
 }
@@ -175,12 +216,20 @@ pub enum PropKind {
     Suitcase(usize),
     Boxes,
     Barrier,
+    EscStep(usize),
+    EscRail(usize),
+    Cabinet,
+    CarSeat,
+    CarWall,
+    CarDoor,
+    Straps,
+    Ad(usize),
 }
 
 impl PropKind {
     /// Tall things that should fade out when the player walks behind them.
     pub fn occludes(&self) -> bool {
-        matches!(self, PropKind::Pillar | PropKind::SignName | PropKind::SignLed | PropKind::Kiosk | PropKind::Vending(_))
+        matches!(self, PropKind::Pillar | PropKind::SignName | PropKind::SignLed | PropKind::Kiosk | PropKind::Vending(_) | PropKind::Cabinet | PropKind::EscRail(_) | PropKind::EscStep(_) | PropKind::Straps | PropKind::Ad(_))
     }
 }
 
@@ -272,6 +321,10 @@ pub struct Map {
     pub edge_spawns: Vec<Vec2>,
     pub track_ys: Vec<f32>,
     pub signs: SignArt,
+    /// Escalator: bottom entrance, top, and its y center (opening only).
+    pub escalator: Option<(Vec2, Vec2)>,
+    pub arcade: Option<Vec2>,
+    pub is_car: bool,
     walls_h: Vec<bool>, // wall between cell (x, y) and (x, y + 1): platform screen doors
     pub floor: Image,
     floor_mask: Vec<bool>,
@@ -342,7 +395,76 @@ impl Map {
 
         let neon = |i: u32| def.neon[(i as usize) % def.neon.len().max(1)];
         let mut k = 0u32;
-        for (bi, (band, y0, y1)) in band_ranges.iter().enumerate() {
+        let mut escalator = None;
+        let mut arcade = None;
+        if def.car {
+            // seats along both sides between the doors, straps, hanging ads, ceiling lights
+            let gaps: Vec<(f32, f32)> = CAR_DOORS.iter().map(|d| (d - 0.75, d + 0.75)).collect();
+            let in_gap = |x: f32| gaps.iter().any(|(a, b)| x + 1.0 > *a && x < *b);
+            let mut x = 0.4;
+            while x + 1.0 <= w as f32 - 0.3 {
+                if !in_gap(x) {
+                    for y in [1.0f32, h as f32 - 0.55] {
+                        props.push(Prop { kind: PropKind::CarSeat, pos: vec2(x, y), size: vec2(1.0, 0.55) });
+                        obstacles.push(Obstacle { min: vec2(x, y), max: vec2(x + 1.0, y + 0.55), low: true });
+                    }
+                }
+                x += 1.0;
+            }
+            let mut x = 0.5;
+            while x + 0.5 <= w as f32 {
+                let door = gaps.iter().any(|(a, b)| x + 0.25 > *a && x + 0.25 < *b);
+                props.push(Prop { kind: if door { PropKind::CarDoor } else { PropKind::CarWall }, pos: vec2(x, h as f32 - 0.02), size: vec2(0.5, 0.1) });
+                x += 0.5;
+            }
+            for y in [2.2f32, h as f32 - 1.6] {
+                let mut x = 0.5;
+                while x + 1.0 <= w as f32 {
+                    props.push(Prop { kind: PropKind::Straps, pos: vec2(x, y), size: vec2(1.0, 0.05) });
+                    x += 1.0;
+                }
+            }
+            let mut x = 1.2;
+            let mut n = 0;
+            while x + 1.1 < w as f32 {
+                props.push(Prop { kind: PropKind::Ad(n % 3), pos: vec2(x, 3.4), size: vec2(1.1, 0.04) });
+                n += 1;
+                x += 2.6;
+            }
+            for y in [2.2f32, h as f32 - 1.6] {
+                let mut x = 1.0;
+                while x < w as f32 {
+                    lights.push(LightDef { pos: vec2(x, y), radius: 2.4, color: def.lamp, flicker: 0.0, phase: 0.0, strobe: false });
+                    x += 2.6;
+                }
+            }
+        }
+        if def.intro_props {
+            // escalator rising east along the front platform, and an arcade cabinet in the corner
+            if let Some((_, y0, y1)) = band_ranges.iter().rev().find(|b| b.0 == Band::Platform) {
+                let yc = (*y0 + *y1) as f32 * 0.5 + 0.6;
+                let x0 = w as f32 - 9.5;
+                for i in 0..ESC_SLICES {
+                    let x = x0 + i as f32 * 0.5;
+                    let _ = esc_height(i);
+                    props.push(Prop { kind: PropKind::EscRail(i), pos: vec2(x, yc - 0.6), size: vec2(0.5, 0.1) });
+                    props.push(Prop { kind: PropKind::EscStep(i), pos: vec2(x, yc - 0.5), size: vec2(0.5, 1.0) });
+                    props.push(Prop { kind: PropKind::EscRail(i), pos: vec2(x, yc + 0.5), size: vec2(0.5, 0.1) });
+                }
+                let len = ESC_SLICES as f32 * 0.5;
+                obstacles.push(Obstacle { min: vec2(x0, yc - 0.6), max: vec2(x0 + len, yc + 0.6), low: false });
+                escalator = Some((vec2(x0 - 0.35, yc), vec2(x0 + len, yc)));
+                lights.push(LightDef { pos: vec2(x0 - 0.8, yc), radius: 2.4, color: rgb(255, 250, 235), flicker: 0.0, phase: 0.0, strobe: false });
+            }
+            if let Some((_, y0, y1)) = band_ranges.iter().find(|b| b.0 == Band::Platform && b.1 > 1) {
+                let c = vec2(2.1, (*y0 + *y1) as f32 * 0.5 - 0.35);
+                props.push(Prop { kind: PropKind::Cabinet, pos: c - vec2(0.4, 0.35), size: vec2(0.8, 0.7) });
+                obstacles.push(Obstacle { min: c - vec2(0.4, 0.35), max: c + vec2(0.4, 0.35), low: false });
+                arcade = Some(c + vec2(0.0, 0.9));
+                lights.push(LightDef { pos: c + vec2(0.0, 1.0), radius: 2.0, color: rgb(140, 120, 255), flicker: 0.0, phase: 0.0, strobe: false });
+            }
+        }
+        for (bi, (band, y0, y1)) in band_ranges.iter().enumerate().filter(|_| !def.car) {
             let (y0f, y1f) = (*y0 as f32, *y1 as f32);
             let yc = (y0f + y1f) * 0.5;
             let above_track = bi > 0 && band_ranges[bi - 1].0 == Band::Track;
@@ -398,7 +520,9 @@ impl Map {
                     } else {
                         let mut x = 4.0;
                         while x < w as f32 - 2.0 {
-                            add_prop(PropKind::Pillar, vec2(x, yc + 0.5), vec2(0.75, 0.75), true, &mut props, &mut obstacles);
+                            if !(def.intro_props && x > w as f32 - 12.0) {
+                                add_prop(PropKind::Pillar, vec2(x, yc + 0.5), vec2(0.75, 0.75), true, &mut props, &mut obstacles);
+                            }
                             x += 6.5;
                         }
                     }
@@ -431,7 +555,7 @@ impl Map {
         }
 
         // ---- platform screen doors along every platform edge, gaps where train doors stop
-        let doors = door_xs(w);
+        let doors = if def.car { Vec::new() } else { door_xs(w) };
         let mut walls_h = vec![false; (gw * gh) as usize];
         let platform_row = |r: i32| r >= 1 && r < h && row_band[r as usize] != Band::Track;
         for (a, b) in &track_bands {
@@ -470,7 +594,7 @@ impl Map {
         let signs = build_signs(def.name, next);
 
         let mut k_sign = 0;
-        for (band, y0, y1) in &band_ranges {
+        for (band, y0, y1) in band_ranges.iter().filter(|_| !def.car) {
             if *band != Band::Platform || y1 - y0 < 5 {
                 continue;
             }
@@ -510,7 +634,7 @@ impl Map {
             !hit_o && !hit_p
         };
         // the kiosk goes against the back wall, or on the concourse
-        for _ in 0..40 {
+        for _ in 0..(if def.car { 0 } else { 40 }) {
             let c = vec2(rng.range(4.0, w as f32 - 5.0), 1.85);
             let half = vec2(1.1, 0.5);
             if free(c, half, &obstacles, &props) {
@@ -520,7 +644,7 @@ impl Map {
                 break;
             }
         }
-        let n_luggage = 6 + index * 2;
+        let n_luggage = if def.car { 0 } else { 6 + index * 2 };
         let mut placed = 0;
         for _ in 0..200 {
             if placed >= n_luggage {
@@ -549,7 +673,7 @@ impl Map {
         let name_w = font::text_width(def.name) as f32 * 0.25 + 1.2;
         let mut u = 4.0;
         let mut toggle = 0;
-        while u + name_w < w as f32 + 2.0 {
+        while u + name_w < w as f32 + 2.0 && !def.car {
             if toggle % 2 == 0 {
                 wall_signs.push(Sign { u0: u, u1: u + name_w, text: def.name.to_string() });
                 lights.push(LightDef { pos: vec2(u + name_w * 0.5, 1.7), radius: 2.4, color: rgb(255, 255, 245), flicker: 0.0, phase: 0.0, strobe: false });
@@ -574,7 +698,7 @@ impl Map {
         }
 
         // spawn points
-        let tunnel_spawns = track_ys.iter().map(|y| vec2(1.2, *y)).collect();
+        let tunnel_spawns = if def.car { Vec::new() } else { track_ys.iter().map(|y| vec2(1.2, *y)).collect() };
         let mut edge_spawns = Vec::new();
         let mut yy = 1.5;
         while yy < gh as f32 - 1.0 {
@@ -615,7 +739,9 @@ impl Map {
         }
 
         let (mut floor, floor_mask, origin) = bake_floor(def, w, h, gw, gh, &tiles, &track_bands, &wall_signs, &ads);
-        paint_details(&mut floor, &floor_mask, origin, def, index, w, h, &tiles, gw, gh, &track_bands, &doors);
+        if !def.car {
+            paint_details(&mut floor, &floor_mask, origin, def, index, w, h, &tiles, gw, gh, &track_bands, &doors);
+        }
         let floor_tex = Texture2D::from_image(&floor);
         floor_tex.set_filter(FilterMode::Nearest);
 
@@ -634,6 +760,9 @@ impl Map {
             edge_spawns,
             track_ys,
             signs,
+            escalator,
+            arcade,
+            is_car: def.car,
             walls_h,
             floor,
             floor_mask,
@@ -775,6 +904,61 @@ impl Map {
                 q.push_back((nx, ny));
             }
         }
+    }
+
+    /// A separate distance field toward any target (used to walk NPCs somewhere).
+    pub fn bfs(&self, target: Vec2) -> Vec<u16> {
+        let gw = self.gw;
+        let mut field = vec![FLOW_MAX; (gw * self.gh) as usize];
+        let (cx, cy) = (target.x.floor().clamp(1.0, (gw - 1) as f32) as i32, target.y.floor().clamp(1.0, (self.gh - 1) as f32) as i32);
+        let mut q = VecDeque::new();
+        field[(cy * gw + cx) as usize] = 0;
+        q.push_back((cx, cy));
+        while let Some((x, y)) = q.pop_front() {
+            let d = field[(y * gw + x) as usize];
+            for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
+                let (nx, ny) = (x + dx, y + dy);
+                if nx < 0 || ny < 0 || nx >= gw || ny >= self.gh {
+                    continue;
+                }
+                let ni = (ny * gw + nx) as usize;
+                if self.blocked[ni] || field[ni] != FLOW_MAX || !self.crossing_ok(x, y, dx, dy) {
+                    continue;
+                }
+                if dx != 0 && dy != 0 && (self.blocked[(y * gw + nx) as usize] || self.blocked[(ny * gw + x) as usize]) {
+                    continue;
+                }
+                field[ni] = d + 1;
+                q.push_back((nx, ny));
+            }
+        }
+        field
+    }
+
+    pub fn dir_in(&self, field: &[u16], p: Vec2) -> Option<Vec2> {
+        let (x, y) = (p.x.floor() as i32, p.y.floor() as i32);
+        if x < 0 || y < 0 || x >= self.gw || y >= self.gh {
+            return None;
+        }
+        let gw = self.gw;
+        let cur = field[(y * gw + x) as usize];
+        if cur == 0 || cur == FLOW_MAX {
+            return None;
+        }
+        let mut best = cur;
+        let mut dir = None;
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)] {
+            let (nx, ny) = (x + dx, y + dy);
+            if nx < 0 || ny < 0 || nx >= gw || ny >= self.gh || !self.crossing_ok(x, y, dx, dy) {
+                continue;
+            }
+            let d = field[(ny * gw + nx) as usize];
+            if d < best {
+                best = d;
+                dir = Some(vec2(nx as f32 + 0.5, ny as f32 + 0.5));
+            }
+        }
+        dir.map(|t| (t - p).normalize_or_zero())
     }
 
     pub fn flow_dir(&self, p: Vec2) -> Option<Vec2> {
@@ -951,9 +1135,9 @@ fn bake_floor(
                 let yc = 1.0 - sx / HALF_W;
                 let zc = (1.0 + yc) * HALF_H - sy;
                 if xr >= 1.0 && xr <= gw as f32 && (0.0..=WALL_H).contains(&zr) {
-                    col = Some(wall_row(def, xr, zr, signs, ads, n));
+                    col = Some(if def.car { car_wall(xr, zr, n, w) } else { wall_row(def, xr, zr, signs, ads, n) });
                 } else if yc >= 1.0 && yc <= gh as f32 && (0.0..=WALL_H).contains(&zc) {
-                    col = Some(wall_col(def, yc, zc, tracks, n));
+                    col = Some(if def.car { car_end(yc, zc, n) } else { wall_col(def, yc, zc, tracks, n) });
                 } else {
                     let b2 = (sy + WALL_H) / HALF_H;
                     let xt = (a + b2) * 0.5;
@@ -1009,6 +1193,18 @@ fn bake_floor(
                             shade(base, if grout { 0.8 } else { 0.94 + tile_var + n * 0.04 })
                         }
                     }
+                    Tile::Concourse if def.car => {
+                        // speckled linoleum with yellow lines marking the door areas
+                        let near_door = CAR_DOORS.iter().any(|d| (x - d).abs() < 0.75);
+                        let edge = y < 1.25 || y > h as f32 - 0.25;
+                        if near_door && (y < 1.6 || y > h as f32 - 0.6) && (fract(x * 4.0) < 0.12) {
+                            rgb(220, 180, 40)
+                        } else if near_door && edge {
+                            shade(def.floor, 0.8)
+                        } else {
+                            shade(def.floor, 0.92 + n * 0.12 + if hash2(ix as i32 / 2, iy as i32 / 2, 4) > 0.93 { 0.12 } else { 0.0 })
+                        }
+                    }
                     Tile::Concourse => {
                         let checker = ((x.floor() + y.floor()) as i32) % 2 == 0;
                         let grout = fract(x) < 0.04 || fract(y) < 0.04;
@@ -1030,6 +1226,67 @@ fn bake_floor(
         }
     }
     (img, mask, vec2(minx, miny))
+}
+
+/// The long side of the train car: windows, doors, LCD screens, ads above the windows.
+fn car_wall(u: f32, z: f32, n: f32, w: i32) -> Color {
+    if u > w as f32 {
+        return rgb(8, 8, 10);
+    }
+    let silver = rgb(206, 210, 216);
+    let door = CAR_DOORS.iter().find(|d| (u - *d).abs() < 0.7);
+    if z < 3.0 {
+        return rgb(60, 62, 68);
+    }
+    if z > 62.0 {
+        return if z < 64.0 { rgb(150, 154, 160) } else { rgb(232, 232, 228) }; // ceiling
+    }
+    if let Some(d) = door {
+        let du = u - d;
+        if (50.0..57.0).contains(&z) && du.abs() < 0.55 {
+            // LCD screen over the door
+            let lit = ((u * 16.0) as i32 + z as i32) % 3 != 0 && (52.0..55.0).contains(&z);
+            return if lit { rgb(255, 160, 40) } else { rgb(14, 16, 20) };
+        }
+        if z < 48.0 {
+            if du.abs() < 0.03 {
+                return rgb(30, 30, 34);
+            }
+            if (26.0..44.0).contains(&z) && du.abs() > 0.12 && du.abs() < 0.5 {
+                return if hash2((u * 16.0) as i32, z as i32, 3) > 0.97 { rgb(120, 140, 170) } else { rgb(18, 24, 34) };
+            }
+            return shade(rgb(184, 190, 198), 0.95 + n * 0.05);
+        }
+    }
+    if (26.0..46.0).contains(&z) {
+        let frame = (z < 27.5) || (z > 44.5) || ((u * 16.0) as i32 % 26 == 0);
+        if frame {
+            return rgb(150, 154, 162);
+        }
+        return if hash2((u * 16.0) as i32, z as i32, 6) > 0.985 { rgb(110, 130, 160) } else { rgb(14, 18, 28) };
+    }
+    if (48.0..60.0).contains(&z) {
+        let pal = [rgb(240, 120, 90), rgb(90, 170, 230), rgb(250, 220, 90), rgb(150, 210, 120)];
+        let k = ((u / 1.3) as usize) % 4;
+        return if ((u * 16.0) as i32) % 21 < 2 { silver } else { shade(pal[k], 0.9) };
+    }
+    if (20.0..22.0).contains(&z) {
+        return rgb(110, 178, 46);
+    }
+    shade(silver, 0.92 + n * 0.06)
+}
+
+fn car_end(u: f32, z: f32, n: f32) -> Color {
+    if (2.6..4.4).contains(&u) && z < 50.0 {
+        if (24.0..44.0).contains(&z) && (2.9..4.1).contains(&u) {
+            return rgb(20, 26, 36); // window into the next car
+        }
+        return rgb(176, 182, 190);
+    }
+    if z > 62.0 {
+        return rgb(232, 232, 228);
+    }
+    shade(rgb(196, 200, 206), 0.9 + n * 0.06)
 }
 
 fn wall_row(def: &StationDef, u: f32, z: f32, signs: &[Sign], ads: &[Ad], n: f32) -> Color {

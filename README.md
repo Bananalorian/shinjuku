@@ -26,6 +26,14 @@ crows picking at whatever the horde left behind.
 | ![Akihabara](docs/screenshots/akihabara.png) | ![The train arriving at Ueno](docs/screenshots/train.png) |
 | ![Ikebukuro](docs/screenshots/ikebukuro.png) | ![Shinjuku](docs/screenshots/shinjuku-boss.png) |
 
+## The opening
+
+A new game starts on a crowded Yamanote line car heading into Akihabara. You ride
+in, get off with the crowd, and head up the escalator just as a quake hits and
+the lights go out. You wake up among the dead, learn to dash when the first
+infected comes for you, find an arcade cabinet you can actually play, and get a
+pistol from a police officer who doesn't make it. Then the Akihabara fight begins.
+
 ## The route
 
 | Station | Line code | What's waiting |
@@ -48,6 +56,8 @@ crows picking at whatever the horde left behind.
 | Pause | Esc / P | Start | |
 | Tilt-shift on/off | T | Y | |
 | Mute | M | Back / View | |
+| Interact | F | X | tap the button |
+| Skip the opening | hold Esc | hold Start | tap the corner |
 | Menus | arrows + Enter, or click | d-pad + A | tap |
 
 Whatever you touched last becomes the active input, and the on-screen hints follow it.
@@ -101,7 +111,9 @@ To inspect the raw sounds natively, run with `SJ_WAV=1` and they're written to `
 
 | File | What lives there |
 |---|---|
-| `src/main.rs` | Scene flow (title, play, upgrade ride, game over, victory) and debug hooks |
+| `src/main.rs` | Scene flow (title, opening, play, upgrade ride, game over, victory) and debug hooks |
+| `src/intro.rs` | The scripted, playable opening: train, quake, dash lesson, arcade, the officer |
+| `src/arcade.rs` | STAR COMMUTER, the playable arcade cabinet |
 | `src/world.rs` | All gameplay: player, zombies, bullets, grenades, particles, train, boss, upgrades |
 | `src/level.rs` | Station definitions, baked floor/wall image, props, lights, collision, flow field |
 | `src/render.rs` | Render pipeline and GLSL shaders (lighting composite, tilt-shift, bloom, grade) |
@@ -149,8 +161,9 @@ SJ_SHOTS=60,300 SJ_STATION=1 SJ_SCENE=train SJ_AUTO=1 cargo run --release
 ```
 
 Renders scripted frames to `/tmp/sj_<frame>.png` and quits. `SJ_SCENE` can be
-`train`, `boss`, `bossnear`, `win`, `dead`, `upgrade`, `wall`, `crows`, or
-`pos:X,Y` to drop the player at a spot. `SJ_SIZE=844x390` simulates a phone
+`train`, `boss`, `bossnear`, `win`, `dead`, `upgrade`, `wall`, `crows`,
+`intro` (the opening from the top), `intro_after` (the opening from the quake on),
+or `pos:X,Y` to drop the player at a spot. With `SJ_AUTO=1` the opening plays itself. `SJ_SIZE=844x390` simulates a phone
 screen, `SJ_NOTILT=1` starts with tilt-shift off, `SJ_AUTO=1` turns on an autopilot
 that wanders and shoots, and `SJ_STATS=1` prints horde stats when it quits (handy
 for checking zombies aren't getting stuck).

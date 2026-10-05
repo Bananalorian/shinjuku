@@ -390,6 +390,110 @@ pub fn zap(seed: u32) -> Vec<f32> {
     b
 }
 
+pub fn quake(seed: u32) -> Vec<f32> {
+    let len = 5.0;
+    let mut b = buf(len);
+    let mut r = Rng::new(seed);
+    let (mut l1, mut l2) = (Lp::default(), Lp::default());
+    for (i, s) in b.iter_mut().enumerate() {
+        let t = i as f32 / SR;
+        let swell = attack(t, 1.5) * (1.0 - smooth01((t - 3.8) / 1.2));
+        let rumble = l2.run(l1.run(r.noise(), 90.0 + 40.0 * (t * 3.0).sin()), 140.0) * 6.0 * swell;
+        let creak = if r.noise() > 0.997 { r.noise() * 0.8 * swell } else { 0.0 };
+        *s = rumble + creak + (TAU * 31.0 * t).sin() * 0.3 * swell;
+    }
+    let crash = explosion(seed + 1, true);
+    let at = (2.9 * SR) as usize;
+    for (i, x) in crash.iter().enumerate() {
+        if at + i < b.len() {
+            b[at + i] += x * 0.9;
+        }
+    }
+    drive(&mut b, 1.4);
+    normalize(&mut b, 0.95);
+    b
+}
+
+fn smooth01(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
+pub fn scream(seed: u32, f0: f32) -> Vec<f32> {
+    let mut b = vocal(seed, 1.1, f0, f0 * 1.3, (6.5, 0.05), 950.0, 1900.0, 0.4, 2.2);
+    let fade = b.len();
+    for (i, x) in b.iter_mut().enumerate() {
+        *x *= 1.0 - i as f32 / fade as f32 * 0.6;
+    }
+    let mut b = reverb(&b, 0.4, 1.8, 0.7);
+    normalize(&mut b, 0.8);
+    b
+}
+
+pub fn retch(seed: u32) -> Vec<f32> {
+    let mut b = buf(0.9);
+    let mut r = Rng::new(seed);
+    let mut bp = Bq::default();
+    let g = vocal(seed + 7, 0.9, 120.0, 90.0, (14.0, 0.08), 500.0, 900.0, 0.9, 3.0);
+    for (i, s) in b.iter_mut().enumerate() {
+        let t = i as f32 / SR;
+        let heave = ((t * 5.5).sin() * 0.5 + 0.5).powi(3);
+        *s = bp.bandpass(r.noise(), 600.0 + 300.0 * heave, 1.4) * heave * 1.6 + g[i] * 0.6 * heave;
+    }
+    normalize(&mut b, 0.75);
+    b
+}
+
+pub fn pew() -> Vec<f32> {
+    let mut b = buf(0.14);
+    let mut ph = 0.0f32;
+    for (i, s) in b.iter_mut().enumerate() {
+        let t = i as f32 / SR;
+        ph += (1300.0 * (-t * 14.0).exp() + 250.0) / SR;
+        *s = sq(ph, 0.5) * (-t * 18.0).exp() * 0.5;
+    }
+    b
+}
+
+pub fn boom8(seed: u32) -> Vec<f32> {
+    let mut b = buf(0.4);
+    let mut r = Rng::new(seed);
+    let mut held = 0.0;
+    for (i, s) in b.iter_mut().enumerate() {
+        let t = i as f32 / SR;
+        if i % 24 == 0 {
+            held = r.noise();
+        }
+        *s = held * (-t * 9.0).exp() * 0.7;
+    }
+    b
+}
+
+pub fn coin() -> Vec<f32> {
+    let mut b = buf(0.4);
+    for (i, s) in b.iter_mut().enumerate() {
+        let t = i as f32 / SR;
+        let f = if t < 0.07 { 988.0 } else { 1319.0 };
+        *s = sq(f * t, 0.5) * if t < 0.07 { 0.4 } else { 0.4 * (-(t - 0.07) * 7.0).exp() };
+    }
+    b
+}
+
+pub fn attract() -> Vec<f32> {
+    let mut b = buf(1.3);
+    for (k, n) in [3.0f32, 7.0, 10.0, 15.0, 10.0, 15.0, 19.0].iter().enumerate() {
+        let t0 = k as f32 * 0.12;
+        let f = note(*n + 12.0);
+        let start = (t0 * SR) as usize;
+        for i in start..b.len() {
+            let t = (i - start) as f32 / SR;
+            b[i] += sq(f * t, 0.25) * (-t * 10.0).exp() * 0.25;
+        }
+    }
+    normalize(&mut b, 0.6);
+    b
+}
+
 // ---------------------------------------------------------------- tones, bells, jingles
 
 /// FM bell: `ratio` sets how metallic it is.
@@ -782,6 +886,13 @@ pub enum Id {
     Select,
     Caw,
     Zap,
+    Quake,
+    Scream,
+    Retch,
+    Pew,
+    Boom8,
+    Coin,
+    Attract,
     Hum,
     Music,
     Ambient,
@@ -835,6 +946,15 @@ pub fn bank() -> Vec<(Id, Vec<u8>)> {
     v.push((Id::Caw, mono(caw(1401, true))));
     v.push((Id::Zap, mono(zap(1500))));
     v.push((Id::Zap, mono(zap(1501))));
+    v.push((Id::Quake, mono(quake(1600))));
+    v.push((Id::Scream, mono(scream(1700, 420.0))));
+    v.push((Id::Scream, mono(scream(1701, 620.0))));
+    v.push((Id::Retch, mono(retch(1800))));
+    v.push((Id::Retch, mono(retch(1801))));
+    v.push((Id::Pew, mono(pew())));
+    v.push((Id::Boom8, mono(boom8(1900))));
+    v.push((Id::Coin, mono(coin())));
+    v.push((Id::Attract, mono(attract())));
     v.push((Id::Hum, mono(hum())));
     let (l, r) = combat_music();
     v.push((Id::Music, wav(&interleave(&l, &r), 2)));

@@ -8,11 +8,13 @@
 //! Everything you see is generated in code: sprites (art.rs), the font (font.rs),
 //! the stations (level.rs), and the lighting/post shaders (render.rs).
 
+mod arcade;
 mod art;
 mod audio;
 mod font;
 mod hud;
 mod input;
+mod intro;
 mod level;
 mod pad;
 mod render;
@@ -31,6 +33,7 @@ use world::*;
 
 enum Scene {
     Title,
+    Intro,
     Play,
     Upgrade { choices: [usize; 3] },
     GameOver,
@@ -54,6 +57,9 @@ struct Game {
     paused: bool,
     up_sel: usize,
     toast: Option<(String, f32)>,
+    intro: Option<intro::Intro>,
+    arcade: Option<arcade::Arcade>,
+    arcade_hi: u32,
 }
 
 impl Game {
@@ -74,6 +80,9 @@ impl Game {
             paused: false,
             up_sel: 0,
             toast: None,
+            intro: None,
+            arcade: None,
+            arcade_hi: 0,
             world,
             art,
             audio,
@@ -121,11 +130,28 @@ impl Game {
         self.input.release_all();
     }
 
+    #[allow(dead_code)]
     fn new_run(&mut self) {
         self.stats = Stats::default();
         self.world.total_kills = 0;
         self.run_time = 0.0;
         self.start_station(0);
+    }
+
+    /// A new game starts with the opening on the train.
+    fn start_intro(&mut self) {
+        self.stats = Stats::default();
+        self.stats_at_start = self.stats;
+        self.kills_at_start = 0;
+        self.run_time = 0.0;
+        self.world = intro::make_car_world(&self.art);
+        self.intro = Some(intro::Intro::new());
+        self.arcade = None;
+        self.scene = Scene::Intro;
+        self.scene_t = 0.0;
+        self.fade = 0.0;
+        self.paused = false;
+        self.input.release_all();
     }
 
     fn roll_upgrades() -> [usize; 3] {
@@ -160,6 +186,14 @@ impl Game {
         let mode = self.input.mode;
         let loops: &[(Id, f32)] = match self.scene {
             Scene::Title => &[(Id::Ambient, 0.5), (Id::Hum, 0.12)],
+            Scene::Intro if self.arcade.is_some() => &[(Id::Hum, 0.05)],
+            Scene::Intro => match self.intro.as_ref().map(|i| i.stage) {
+                Some(intro::Stage::CarRide) | Some(intro::Stage::CarArrive) => &[(Id::Ride, 0.45)],
+                Some(intro::Stage::Platform) => &[(Id::Hum, 0.16), (Id::Ambient, 0.18)],
+                Some(intro::Stage::Escalator) | Some(intro::Stage::Blackout) => &[],
+                Some(intro::Stage::Armed) | Some(intro::Stage::Done) => &[(Id::Music, 0.22), (Id::Hum, 0.06)],
+                _ => &[(Id::Hum, 0.07)],
+            },
             Scene::Play if self.paused => &[(Id::Music, 0.1), (Id::Hum, 0.08)],
             Scene::Play => match self.world.phase {
                 Phase::Dead => &[(Id::Hum, 0.1)],
@@ -184,7 +218,66 @@ impl Game {
                 hud::draw_title(&self.art, u, t, &self.defs, mode);
                 if ui.confirm && t > 0.4 {
                     self.audio.play(Id::Select, 1.0);
-                    self.new_run();
+                    self.start_intro();
+                }
+            }
+            Scene::Intro => {
+                if let Some(mut a) = self.arcade.take() {
+                    // standing at the cabinet
+                    let mut x = ctl.mv.x;
+                    if is_key_down(KeyCode::Left) { x -= 1.0; }
+                    if is_key_down(KeyCode::Right) { x += 1.0; }
+                    let ain = arcade::ArcadeIn { x: x.clamp(-1.0, 1.0), fire: ctl.fire || ctl.dash || ui.confirm || is_key_down(KeyCode::Space), exit: ui.back || ui.pause };
+                    let leave = a.update(dt, &ain);
+                    for id in a.sounds.drain(..) {
+                        self.audio.play(id, 1.0);
+                    }
+                    self.arcade_hi = self.arcade_hi.max(a.hi);
+                    self.fx.render(&self.world, &self.art, 1.35);
+                    a.draw(&self.art, u);
+                    if leave {
+                        if let Some(i) = &mut self.intro {
+                            i.arcade_played = true;
+                        }
+                    } else {
+                        self.arcade = Some(a);
+                    }
+                } else if let Some(mut it) = self.intro.take() {
+                    let out = it.update(&mut self.world, &mut ctl, &ui, mode, dt, &self.fx);
+                    if out.need_platform {
+                        self.world = World::new(0, &self.defs, &self.art, self.stats, 0, false);
+                        it.setup_platform(&mut self.world);
+                    }
+                    self.world.update(dt, &ctl);
+                    self.audio.handle(&self.world.sfx, &self.world);
+                    self.world.sfx.clear();
+                    if self.world.phase != Phase::Intro {
+                        self.audio.horde(&self.world, dt);
+                    }
+                    self.fx.render(&self.world, &self.art, 1.35);
+                    it.draw(&self.art, u, mode, &self.world, &self.fx);
+                    let died = self.world.events.iter().any(|e| *e == Event::Died);
+                    self.world.events.clear();
+                    if out.open_arcade {
+                        self.arcade = Some(arcade::Arcade::new(self.arcade_hi));
+                        self.audio.play(Id::Coin, 1.0);
+                    }
+                    if died {
+                        self.audio.play(Id::GameOver, 1.0);
+                        self.scene = Scene::GameOver;
+                        self.scene_t = 0.0;
+                    } else if out.finished {
+                        if out.skipped {
+                            self.start_station(0);
+                        } else {
+                            self.stats_at_start = self.stats;
+                            self.kills_at_start = 0;
+                            self.scene = Scene::Play;
+                            self.scene_t = 0.0;
+                        }
+                    } else {
+                        self.intro = Some(it);
+                    }
                 }
             }
             Scene::Play => {
@@ -209,6 +302,7 @@ impl Game {
                 let events: Vec<Event> = self.world.events.drain(..).collect();
                 for e in events {
                     match e {
+                        Event::GotPistol => {}
                         Event::Boarded => {
                             if self.world.station + 1 < self.defs.len() {
                                 self.scene = Scene::Upgrade { choices: Self::roll_upgrades() };
@@ -392,6 +486,62 @@ fn env_flag(_name: &str) -> bool {
     false
 }
 
+/// Debug only: plays through the opening by itself so it can be screenshotted.
+fn intro_autopilot(game: &mut Game, frame: u32) -> Controls {
+    use intro::Stage::*;
+    let mut c = Controls::default();
+    let w = &game.world;
+    let p = w.player.pos;
+    let toward = |t: Vec2| world_to_screen_dir(t - p).normalize_or_zero();
+    let Some(it) = game.intro.as_mut() else { return c };
+    match it.stage {
+        CarArrive => {
+            let d = *level::CAR_DOORS.iter().min_by(|a, b| (*a - p.x).abs().partial_cmp(&(*b - p.x).abs()).unwrap()).unwrap();
+            c.mv = toward(vec2(d, w.map.h as f32));
+        }
+        Platform => {
+            if let Some((b, _)) = w.map.escalator {
+                c.mv = toward(b);
+            }
+        }
+        Explore => {
+            c.mv = toward(vec2(2.6, *w.map.track_ys.last().unwrap() + 3.9));
+        }
+        DashPrompt => c.dash = true,
+        Wander => {
+            if let Some(a) = w.map.arcade {
+                if p.distance(a) > 1.0 && !it.arcade_played {
+                    c.mv = toward(a);
+                } else if !it.arcade_played && game.arcade.is_none() {
+                    game.arcade = Some(arcade::Arcade::new(0));
+                }
+            }
+        }
+        Overrun | Ambush => {
+            if let Some(k) = w.pickups.iter().find(|k| k.kind == PickupKind::Pistol && k.z <= 0.0) {
+                c.mv = toward(k.pos);
+            }
+        }
+        Armed | Done => {
+            c.auto_aim = true;
+            c.fire = true;
+        }
+        _ => {}
+    }
+    // leave the arcade after a few seconds of play
+    if game.arcade.is_some() {
+        c.fire = frame % 20 < 10;
+        c.mv = vec2(((frame as f32) * 0.05).sin(), 0.0);
+        if frame % 240 == 0 {
+            game.arcade = None;
+            if let Some(i) = &mut game.intro {
+                i.arcade_played = true;
+            }
+        }
+    }
+    c
+}
+
 #[macroquad::main(window_conf)]
 async fn main() {
     rand::srand((miniquad::date::now() * 1000.0) as u64);
@@ -419,6 +569,16 @@ async fn main() {
     }
     if let Some(d) = &dbg {
         rand::srand(7);
+        if d.scene == "intro" || d.scene == "intro_after" {
+            game.start_intro();
+        }
+        if d.scene == "intro_after" {
+            game.world = World::new(0, &game.defs, &game.art, game.stats, 0, false);
+            if let Some(it) = &mut game.intro {
+                it.setup_platform(&mut game.world);
+                it.setup_aftermath(&mut game.world);
+            }
+        }
         if let Some(s) = d.station {
             game.start_station(s);
             game.fade = 0.0;
@@ -477,7 +637,9 @@ async fn main() {
         let (dt, scripted) = match &dbg {
             Some(d) => {
                 let t = frame as f32 / 60.0;
-                let c = if d.auto {
+                let c = if d.auto && game.intro.is_some() {
+                    Some(intro_autopilot(&mut game, frame))
+                } else if d.auto {
                     let mut c = Controls { mv: vec2((t * 0.45).cos(), (t * 0.62).sin()) * 0.8, auto_aim: true, ..Default::default() };
                     if game.world.phase == Phase::Train {
                         if let Some(tr) = &game.world.train {
@@ -506,6 +668,13 @@ async fn main() {
         if let Some(d) = &dbg {
             if d.shots.contains(&frame) {
                 get_screen_data().export_png(&format!("/tmp/sj_{}.png", frame));
+                if env_flag("SJ_STATS") {
+                    let st = game.intro.as_ref().map(|i| format!("{:?} t={:.1}", i.stage, i.t)).unwrap_or("-".into());
+                    println!("frame {} intro {} arcade {} npcs {} zombies {} gun {}", frame, st, game.arcade.is_some(), game.world.npcs.len(), game.world.zombies.len(), game.world.has_gun);
+                    let zs: Vec<String> = game.world.zombies.iter().map(|z| format!("({:.1},{:.1} spd {:.1})", z.pos.x, z.pos.y, z.speed)).collect();
+                    let tr = game.world.train.as_ref().map(|t| format!("head {:.1} target {:.1} y {:.1} pass {}", t.head, t.target, t.y, t.pass)).unwrap_or("none".into());
+                    println!("   player ({:.1},{:.1}) zombies {:?} train {}", game.world.player.pos.x, game.world.player.pos.y, zs, tr);
+                }
             }
             if frame >= *d.shots.iter().max().unwrap_or(&1) {
                 if env_flag("SJ_STATS") {

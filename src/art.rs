@@ -52,6 +52,27 @@ pub struct Art {
     pub kiosk: Spr,
     pub barrier: Spr,
     pub crow: [Spr; 4], // stand, peck, wings up, wings down
+    /// Ordinary commuters: walk cycles, holding a strap, sitting, and on their knees.
+    pub commuters: Vec<CharArt>,
+    pub strap: Vec<Spr>,
+    pub sit: Vec<Spr>,
+    pub kneel: Spr,
+    pub officer: CharArt,
+    pub pistol: Spr,
+    pub esc_step: Vec<Spr>, // escalator slices, rising
+    pub esc_rail: Vec<Spr>,
+    pub cabinet: Spr,
+    pub car_seat: Spr,
+    pub car_wall: Spr,
+    pub car_door: Spr,
+    pub straps: Spr,
+    pub ads: Vec<Spr>,
+}
+
+pub const ESC_SLICES: usize = 10;
+
+pub fn esc_height(i: usize) -> f32 {
+    3.0 + i as f32 * 3.2
 }
 
 /// Station-specific hanging signs, built per map (they carry the station's name).
@@ -121,6 +142,21 @@ impl Cv {
     }
     fn get(&self, x: i32, y: i32) -> Option<Color> {
         if x >= 0 && y >= 0 && x < self.w && y < self.h { self.p[(y * self.w + x) as usize] } else { None }
+    }
+    fn clear(&mut self, x: i32, y: i32) {
+        if x >= 0 && y >= 0 && x < self.w && y < self.h {
+            self.p[(y * self.w + x) as usize] = None;
+        }
+    }
+    /// Copy rows [y0, y1) of another canvas into this one, shifted down by `dy`.
+    fn blit_rows(&mut self, src: &Cv, y0: i32, y1: i32, dy: i32) {
+        for y in y0..y1 {
+            for x in 0..src.w {
+                if let Some(c) = src.get(x, y) {
+                    self.set(x, y + dy, c);
+                }
+            }
+        }
     }
     fn rect(&mut self, x: i32, y: i32, w: i32, h: i32, c: Color) {
         for yy in y..y + h {
@@ -921,6 +957,152 @@ fn make_crow(frame: usize) -> Cv {
     c
 }
 
+fn make_esc_step(h: f32) -> (Image, Vec2) {
+    iso_box(0.5, 1.0, h, |f, u, v| {
+        let k = face_k(f);
+        Some(match f {
+            Face::Top => {
+                let gi = (v * 16.0) as i32;
+                if u < 0.06 { rgb(240, 200, 40) } else if gi % 2 == 0 { rgb(70, 72, 78) } else { rgb(110, 112, 120) }
+            }
+            Face::Right => shade(rgb(90, 92, 100), k),
+            Face::Left => shade(if (v as i32) % 3 == 0 { rgb(60, 62, 68) } else { rgb(120, 124, 132) }, k),
+        })
+    })
+}
+
+fn make_esc_rail(h: f32) -> (Image, Vec2) {
+    let (img, a) = iso_box(0.5, 0.1, h + 12.0, |f, _u, v| {
+        let top = v > h + 9.5;
+        Some(if top || f == Face::Top {
+            rgb(24, 24, 28)
+        } else if v < h - 2.0 {
+            shade(rgb(150, 154, 162), face_k(f))
+        } else {
+            Color::new(0.6, 0.75, 0.85, 0.55) // glass
+        })
+    });
+    (img, a)
+}
+
+fn make_cabinet() -> (Image, Vec2) {
+    let body = rgb(70, 30, 120);
+    let (img, a) = iso_box(0.8, 0.7, 32.0, |f, u, v| {
+        let k = face_k(f);
+        let ui = (u * 16.0) as i32;
+        let c = match f {
+            Face::Top => rgb(20, 18, 26),
+            Face::Right => {
+                if ((u * 10.0 + v * 0.3) as i32) % 4 == 0 { rgb(255, 210, 60) } else { body }
+            }
+            Face::Left => {
+                if v > 27.0 && v < 31.0 {
+                    // marquee
+                    let pal = [rgb(255, 80, 200), rgb(80, 220, 255), rgb(255, 230, 80)];
+                    pal[((ui + v as i32) / 2) as usize % 3]
+                } else if (16.0..26.0).contains(&v) && (0.1..0.7).contains(&u) {
+                    // the screen: a formation of tiny aliens
+                    let vi = v as i32;
+                    if (vi == 23 || vi == 21) && ui % 2 == 0 {
+                        if vi == 23 { rgb(120, 255, 140) } else { rgb(255, 120, 200) }
+                    } else if vi == 17 && ui == 6 {
+                        rgb(255, 255, 255)
+                    } else {
+                        rgb(10, 14, 40)
+                    }
+                } else if (12.0..15.0).contains(&v) {
+                    if v as i32 == 13 && (ui == 4 || ui == 8) { rgb(255, 50, 50) } else if v as i32 == 13 && ui == 6 { rgb(60, 120, 255) } else { rgb(20, 20, 24) }
+                } else {
+                    body
+                }
+            }
+        };
+        let lit = f == Face::Left && v > 15.0;
+        Some(if lit { c } else { shade(c, k) })
+    });
+    (outline_image(&img), a)
+}
+
+fn make_car_seat() -> (Image, Vec2) {
+    let cushion = rgb(40, 140, 120);
+    let (img, a) = iso_box(1.0, 0.55, 10.0, |f, u, v| {
+        let k = face_k(f);
+        Some(match f {
+            Face::Top => if ((u * 16.0) as i32) % 4 == 0 { shade(cushion, 0.8) } else { cushion },
+            _ => if v > 6.0 { shade(cushion, k) } else { shade(rgb(150, 154, 160), k * 0.8) },
+        })
+    });
+    (outline_image(&img), a)
+}
+
+fn make_car_wall(door: bool) -> (Image, Vec2) {
+    let (img, a) = iso_box(0.5, 0.1, 13.0, |f, u, v| {
+        let k = face_k(f);
+        Some(shade(
+            if f == Face::Top {
+                rgb(170, 174, 182)
+            } else if door {
+                if (u * 16.0) as i32 == 0 { rgb(30, 30, 34) } else if v > 8.0 { rgb(40, 50, 60) } else { rgb(176, 182, 190) }
+            } else if (9.0..11.0).contains(&v) {
+                rgb(110, 178, 46)
+            } else {
+                rgb(196, 202, 210)
+            },
+            k,
+        ))
+    });
+    (outline_image(&img), a)
+}
+
+fn make_straps() -> (Image, Vec2) {
+    iso_box(1.0, 0.05, 66.0, |f, u, v| {
+        if f == Face::Top {
+            return None;
+        }
+        let rail = (60.0..62.0).contains(&v);
+        let loop_at = |c: f32| (u - c).abs() < 0.04;
+        let strap = (52.0..60.0).contains(&v) && (loop_at(0.25) || loop_at(0.75));
+        let ring = (48.0..52.0).contains(&v) && ((u - 0.25).abs() < 0.1 || (u - 0.75).abs() < 0.1) && !((49.0..51.0).contains(&v) && ((u - 0.25).abs() < 0.05 || (u - 0.75).abs() < 0.05));
+        if rail {
+            Some(rgb(180, 184, 192))
+        } else if strap {
+            Some(rgb(60, 60, 66))
+        } else if ring {
+            Some(rgb(236, 236, 230))
+        } else {
+            None
+        }
+    })
+}
+
+fn make_ad(seed: i32) -> (Image, Vec2) {
+    let pal = [rgb(250, 90, 70), rgb(70, 160, 240), rgb(250, 210, 70), rgb(120, 200, 110), rgb(240, 120, 200)];
+    let a = pal[seed as usize % 5];
+    let b = pal[(seed as usize + 2) % 5];
+    iso_box(1.1, 0.04, 66.0, |f, u, v| {
+        if f == Face::Top {
+            return None;
+        }
+        if (60.0..64.0).contains(&v) && (u - 0.55).abs() < 0.03 {
+            return Some(rgb(120, 120, 126));
+        }
+        if !(46.0..60.0).contains(&v) {
+            return None;
+        }
+        let ui = (u * 16.0) as i32;
+        let edge = v < 47.0 || v > 59.0 || ui == 0 || ui >= 17;
+        Some(if edge {
+            rgb(240, 240, 236)
+        } else if v > 53.0 {
+            a
+        } else if (v as i32) % 2 == 0 && ui > 2 && ui < 15 {
+            rgb(40, 40, 46)
+        } else {
+            mix(b, WHITE, 0.6)
+        })
+    })
+}
+
 /// Hanging signs for one station: a name board and a blinking LED departure board.
 pub fn build_signs(name: &str, l1: &str) -> SignArt {
     let mut p = Packer::new_sized(512);
@@ -1173,10 +1355,114 @@ impl Art {
             *slot = Spr { r: p.add(&img), anchor: vec2(5.0, 7.0) };
         }
 
+        // ---- ordinary people for the opening
+        let skin = [rgb(226, 178, 140), rgb(204, 156, 116), rgb(238, 198, 164)];
+        let human = Look { zombie: false, eye: rgb(40, 30, 30), scarf: false, seed: 40, ..base };
+        let looks = vec![
+            Look { skin: skin[0], top: rgb(36, 44, 76), legs: rgb(40, 44, 60), ..human },
+            Look { skin: skin[1], top: rgb(70, 72, 78), legs: rgb(62, 64, 70), accent2: rgb(40, 60, 140), ..human },
+            Look { skin: skin[2], top: rgb(40, 40, 46), legs: rgb(34, 34, 40), head: Head::LongHair, tie: false, skirt: true, ..human },
+            Look { skin: skin[0], top: rgb(176, 146, 104), legs: rgb(50, 46, 44), tie: false, hair: rgb(60, 40, 30), ..human },
+            Look { skin: skin[1], top: rgb(60, 130, 90), legs: rgb(52, 70, 110), tie: false, head: Head::Hood, accent: rgb(230, 230, 230), ..human },
+            Look { skin: skin[2], top: rgb(110, 80, 60), legs: rgb(70, 66, 60), hair: rgb(180, 180, 184), ..human },
+            Look { skin: skin[0], top: rgb(40, 110, 200), legs: rgb(200, 190, 160), tie: false, hair: rgb(200, 170, 90), ..human },
+            Look { skin: skin[2], top: rgb(236, 236, 240), legs: rgb(36, 40, 70), head: Head::LongHair, tie: false, skirt: true, accent: rgb(236, 236, 240), hair: rgb(70, 46, 30), ..human },
+        ];
+        let commuters: Vec<CharArt> = looks.iter().map(|l| char_art(&mut p, |b, f| humanoid(l, b, f))).collect();
+        let strap: Vec<Spr> = looks
+            .iter()
+            .map(|l| {
+                let mut c = humanoid(l, false, 0);
+                let sleeve = shade(l.top, 0.75);
+                for y in 6..14 {
+                    c.clear(10, y);
+                }
+                c.rect(10, 1, 1, 7, sleeve);
+                c.set(10, 0, shade(l.skin, 0.85));
+                let (img, _) = c.finish();
+                Spr { r: p.add(&img), anchor: vec2(7.0, 20.0) }
+            })
+            .collect();
+        let sit: Vec<Spr> = looks
+            .iter()
+            .map(|l| {
+                let stand = humanoid(l, false, 0);
+                let mut c = Cv::new(12, 18);
+                c.blit_rows(&stand, 0, 14, 1);
+                let leg = if l.skirt { shade(l.skin, 0.9) } else { l.legs };
+                c.rect(3, 15, 2, 2, leg);
+                c.rect(7, 15, 2, 2, leg);
+                c.rect(3, 17, 2, 1, l.shoes);
+                c.rect(7, 17, 2, 1, l.shoes);
+                let (img, _) = c.finish();
+                Spr { r: p.add(&img), anchor: vec2(7.0, 18.0) }
+            })
+            .collect();
+        let kneel = {
+            let l = &looks[1];
+            let stand = humanoid(l, false, 0);
+            let mut c = Cv::new(12, 20);
+            c.blit_rows(&stand, 0, 14, 5);
+            c.rect(2, 18, 8, 2, l.legs); // knees on the ground
+            c.rect(1, 17, 1, 2, l.skin);
+            c.rect(10, 17, 1, 2, l.skin); // hands braced on the floor
+            let (img, _) = c.finish();
+            Spr { r: p.add(&img), anchor: vec2(7.0, 20.0) }
+        };
+        let cop = Look {
+            skin: skin[0],
+            hair: rgb(30, 40, 80),
+            top: rgb(40, 52, 96),
+            accent: rgb(150, 190, 230),
+            accent2: rgb(30, 30, 34),
+            legs: rgb(36, 44, 76),
+            eye: rgb(40, 30, 30),
+            head: Head::Helmet,
+            tie: false,
+            skirt: false,
+            zombie: false,
+            scarf: false,
+            seed: 50,
+            shoes: rgb(16, 14, 14),
+        };
+        let officer = char_art(&mut p, |b, f| {
+            let mut c = humanoid(&cop, b, f);
+            c.set(5, 1 + (f % 2) as i32, rgb(250, 210, 60)); // cap badge
+            c
+        });
+        let mut pistol = Cv::new(7, 4);
+        pistol.rect(1, 0, 6, 2, rgb(40, 42, 48));
+        pistol.rect(2, 0, 4, 1, rgb(96, 100, 110));
+        pistol.rect(1, 2, 2, 2, rgb(50, 40, 34));
+        let (pimg, _) = pistol.finish();
+        let pistol = Spr { r: p.add(&pimg), anchor: vec2(2.0, 3.0) };
+        let esc_step = (0..ESC_SLICES).map(|i| { let (img, a) = make_esc_step(esc_height(i)); Spr { r: p.add(&img), anchor: a } }).collect();
+        let esc_rail = (0..ESC_SLICES).map(|i| { let (img, a) = make_esc_rail(esc_height(i)); Spr { r: p.add(&img), anchor: a } }).collect();
+        let cabinet = { let (i, a) = make_cabinet(); Spr { r: p.add(&i), anchor: a } };
+        let car_seat = { let (i, a) = make_car_seat(); Spr { r: p.add(&i), anchor: a } };
+        let car_wall = { let (i, a) = make_car_wall(false); Spr { r: p.add(&i), anchor: a } };
+        let car_door = { let (i, a) = make_car_wall(true); Spr { r: p.add(&i), anchor: a } };
+        let straps = { let (i, a) = make_straps(); Spr { r: p.add(&i), anchor: a } };
+        let ads = (0..3).map(|k| { let (i, a) = make_ad(k); Spr { r: p.add(&i), anchor: a } }).collect();
+
         let tex = Texture2D::from_image(&p.img);
         tex.set_filter(FilterMode::Nearest);
 
         Art {
+            commuters,
+            strap,
+            sit,
+            kneel,
+            officer,
+            pistol,
+            esc_step,
+            esc_rail,
+            cabinet,
+            car_seat,
+            car_wall,
+            car_door,
+            straps,
+            ads,
             psd,
             suitcases,
             boxes,

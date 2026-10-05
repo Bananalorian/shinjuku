@@ -256,11 +256,15 @@ impl Fx {
         gl_use_material(&self.add);
         draw_particles(w, art, true, view);
         draw_bullets(w, art);
+        draw_car_windows(w, art);
         gl_use_default_material();
 
         // 2. light
         set_camera(&rt_cam(&self.light, vw, vh, tl));
-        clear_background(w.ambient);
+        let amb = w.ambient;
+        let e = w.emergency;
+        let s = w.light_scale.max(0.25 * (1.0 - e));
+        clear_background(Color::new(amb.r * s * (1.0 - 0.55 * e) + 0.03 * e, amb.g * s * (1.0 - 0.65 * e), amb.b * s * (1.0 - 0.6 * e), 1.0));
         gl_use_material(&self.add);
         draw_lights(w, view);
         gl_use_default_material();
@@ -349,6 +353,7 @@ enum Item {
     Slice(usize),
     Ghost(usize),
     Bird(usize),
+    Npc(usize),
 }
 
 fn draw_sorted(w: &World, art: &Art, view: Rect) {
@@ -376,6 +381,12 @@ fn draw_sorted(w: &World, art: &Art, view: Rect) {
     }
     for (i, g) in w.ghosts.iter().enumerate() {
         items.push((g.pos.x + g.pos.y - 0.01, Item::Ghost(i)));
+    }
+    for (i, n) in w.npcs.iter().enumerate() {
+        if inview(n.pos) {
+            let d = if n.state == NpcState::Corpse { -0.3 } else { 0.0 };
+            items.push((n.pos.x + n.pos.y + d, Item::Npc(i)));
+        }
     }
     for (i, b) in w.birds.iter().enumerate() {
         if inview(b.pos) {
@@ -410,6 +421,19 @@ fn draw_sorted(w: &World, art: &Art, view: Rect) {
                     PropKind::Suitcase(v) => (&art.tex, &art.suitcases[v.min(art.suitcases.len() - 1)]),
                     PropKind::Boxes => (&art.tex, &art.boxes),
                     PropKind::Barrier => (&art.tex, &art.barrier),
+                    PropKind::EscStep(i) => (&art.tex, &art.esc_step[i]),
+                    PropKind::EscRail(i) => (&art.tex, &art.esc_rail[i]),
+                    PropKind::Cabinet => (&art.tex, &art.cabinet),
+                    PropKind::CarSeat => (&art.tex, &art.car_seat),
+                    PropKind::CarWall => (&art.tex, &art.car_wall),
+                    PropKind::CarDoor => {
+                        if w.car_doors_open {
+                            continue;
+                        }
+                        (&art.tex, &art.car_door)
+                    }
+                    PropKind::Straps => (&art.tex, &art.straps),
+                    PropKind::Ad(n) => (&art.tex, &art.ads[n % art.ads.len()]),
                     PropKind::SignName => (&w.map.signs.tex, &w.map.signs.name),
                     PropKind::SignLed => (&w.map.signs.tex, &w.map.signs.led[blink]),
                 };
@@ -436,8 +460,11 @@ fn draw_sorted(w: &World, art: &Art, view: Rect) {
                 let k = &w.pickups[i];
                 let gz = w.map.ground_z(k.pos);
                 shadow(art, iso3(k.pos.x, k.pos.y, gz), 0.7);
-                if k.t < 15.0 || (k.t * 8.0) as i32 % 2 == 0 {
-                    spr(art, &art.onigiri, iso3(k.pos.x, k.pos.y, gz + 4.0 + (k.t * 4.0).sin() * 2.0), false, WHITE);
+                let bob = gz + 4.0 + k.z + if k.z <= 0.0 { (k.t * 4.0).sin() * 2.0 } else { 0.0 };
+                if k.kind == PickupKind::Pistol {
+                    spr(art, &art.pistol, iso3(k.pos.x, k.pos.y, bob), false, WHITE);
+                } else if k.t < 15.0 || (k.t * 8.0) as i32 % 2 == 0 {
+                    spr(art, &art.onigiri, iso3(k.pos.x, k.pos.y, bob), false, WHITE);
                 }
             }
             Item::Grenade(i) => {
@@ -454,6 +481,7 @@ fn draw_sorted(w: &World, art: &Art, view: Rect) {
                 let a = (g.life / 0.25) * 0.55;
                 spr(art, &art.player.flash[view][g.frame], iso3(g.pos.x, g.pos.y, gz), g.face_left, Color::new(0.3, 0.9, 1.0, a));
             }
+            Item::Npc(i) => draw_npc(w, art, &w.npcs[i]),
             Item::Bird(i) => {
                 let b = &w.birds[i];
                 let gz = w.map.ground_z(b.pos);
@@ -476,6 +504,54 @@ fn draw_sorted(w: &World, art: &Art, view: Rect) {
                     }
                 };
                 spr(art, s, at, false, WHITE);
+            }
+        }
+    }
+}
+
+fn draw_npc(w: &World, art: &Art, n: &Npc) {
+    let gz = w.map.ground_z(n.pos);
+    let ground = iso3(n.pos.x, n.pos.y, gz);
+    let look = n.look % art.commuters.len();
+    let ca = if n.officer { &art.officer } else { &art.commuters[look] };
+    let sway = if matches!(n.state, NpcState::Stand | NpcState::Strap) { (n.vel.x - n.vel.y).clamp(-1.0, 1.0) * 2.0 } else { 0.0 };
+    match n.state {
+        NpcState::Corpse => {
+            let s = &ca.frames[0][0];
+            let at = ground;
+            draw_texture_ex(
+                &art.tex,
+                (at.x - s.r.h * 0.5).round(),
+                (at.y - s.r.w * 0.5).round(),
+                Color::new(0.72, 0.66, 0.66, 1.0),
+                DrawTextureParams { source: Some(s.r), rotation: if n.face_left { -std::f32::consts::FRAC_PI_2 } else { std::f32::consts::FRAC_PI_2 }, ..Default::default() },
+            );
+            return;
+        }
+        NpcState::Sit => {
+            spr(art, &art.sit[look], ground, n.face_left, WHITE);
+            return;
+        }
+        _ => {}
+    }
+    shadow(art, ground, 1.0);
+    match n.state {
+        NpcState::Strap => spr(art, &art.strap[look], ground + vec2(sway, 0.0), n.face_left, WHITE),
+        NpcState::Kneel => spr(art, &art.kneel, ground, n.face_left, WHITE),
+        _ => {
+            let view = if n.back { 1 } else { 0 };
+            let moving = matches!(n.state, NpcState::Walk | NpcState::Ride);
+            let frame = if moving { (n.anim as usize) % 4 } else { 0 };
+            let at = iso3(n.pos.x, n.pos.y, gz + n.z) + vec2(sway, 0.0);
+            spr(art, &ca.frames[view][frame], at, n.face_left, WHITE);
+            if n.officer && n.state == NpcState::Shoot {
+                let sd = world_to_screen_dir(n.aim).normalize_or_zero();
+                let a = sd.y.atan2(sd.x);
+                let pivot = (at + vec2(sd.x.signum() * 2.0, -9.0)).round();
+                let left = sd.x < 0.0;
+                let s = &art.pistol;
+                let ay = if left { s.r.h - s.anchor.y } else { s.anchor.y };
+                draw_texture_ex(&art.tex, pivot.x - s.anchor.x, pivot.y - ay, WHITE, DrawTextureParams { source: Some(s.r), rotation: a, pivot: Some(pivot), flip_y: left, ..Default::default() });
             }
         }
     }
@@ -528,8 +604,8 @@ fn draw_zombie(w: &World, art: &Art, z: &Zombie) {
 
 fn draw_player(w: &World, art: &Art) {
     let p = &w.player;
-    if w.phase == Phase::Dead {
-        // lying in a pool of it
+    if w.phase == Phase::Dead || w.player_lying {
+        // lying in a pool of it (or knocked out)
         let gz = w.map.ground_z(p.pos);
         let at = iso3(p.pos.x, p.pos.y, gz);
         let s = &art.player.frames[0][0];
@@ -546,15 +622,15 @@ fn draw_player(w: &World, art: &Art) {
         return;
     }
     let gz = w.map.ground_z(p.pos);
-    let ground = iso3(p.pos.x, p.pos.y, gz);
-    shadow(art, ground, 1.0);
+    shadow(art, iso3(p.pos.x, p.pos.y, gz), 1.0);
+    let ground = iso3(p.pos.x, p.pos.y, gz + w.player_z);
     let view = if p.back { 1 } else { 0 };
     let frame = if p.moving { (p.anim as usize) % 4 } else { 0 };
     let gun = |art: &Art| {
         let a = p.aim_screen.y.atan2(p.aim_screen.x);
         let pivot = (ground + vec2(p.aim_screen.x.signum() * 2.0, -9.0)).round();
         let left = p.aim_screen.x < 0.0;
-        let s = &art.gun;
+        let s = if w.stats.multishot > 1 || w.stats.rate > 7.5 { &art.gun } else { &art.pistol };
         let ay = if left { s.r.h - s.anchor.y } else { s.anchor.y };
         draw_texture_ex(
             &art.tex,
@@ -564,11 +640,11 @@ fn draw_player(w: &World, art: &Art) {
             DrawTextureParams { source: Some(s.r), rotation: a, pivot: Some(pivot), flip_y: left, ..Default::default() },
         );
     };
-    if p.back {
+    if p.back && w.has_gun {
         gun(art);
     }
     spr(art, &art.player.frames[view][frame], ground, p.face_left, WHITE);
-    if !p.back {
+    if !p.back && w.has_gun {
         gun(art);
     }
 }
@@ -643,6 +719,22 @@ fn draw_particles(w: &World, art: &Art, additive: bool, view: Rect) {
                     DrawTextureParams { source: Some(art.white), dest_size: Some(vec2(s, s)), ..Default::default() },
                 );
             }
+        }
+    }
+}
+
+/// Tunnel lights streaking past the car windows while the train moves.
+fn draw_car_windows(w: &World, art: &Art) {
+    if !w.map.is_car {
+        return;
+    }
+    let len = w.map.w as f32;
+    for k in 0..7 {
+        let x = len - ((w.time * w.car_speed * 1.6 + k as f32 * len / 7.0) % len);
+        for z in [31.0f32, 37.0, 42.0] {
+            let at = iso3(x, 1.0, z).round();
+            let n = (w.car_speed * 1.2).clamp(2.0, 14.0);
+            draw_texture_ex(&art.tex, at.x, at.y, Color::new(1.0, 0.92, 0.7, 0.55), DrawTextureParams { source: Some(art.white), dest_size: Some(vec2(n, 1.0)), rotation: 0.4636, ..Default::default() });
         }
     }
 }
@@ -725,8 +817,16 @@ fn draw_lights(w: &World, view: Rect) {
         if !visible(l.pos, l.radius) {
             continue;
         }
-        let mut k = 0.5;
-        if l.flicker > 0.0 {
+        // after the quake: most tubes are dead, the survivors flicker
+        let survivor = hash2((l.pos.x * 3.0) as i32, (l.pos.y * 3.0) as i32, 17) < 0.3;
+        if w.emergency > 0.0 && !survivor {
+            if hash2((l.pos.x * 3.0) as i32, (l.pos.y * 3.0) as i32, 23) < 0.35 {
+                light_circle(l.pos, 1.4, Color::new(1.0, 0.15, 0.1, 1.0), 0.3 * w.emergency);
+            }
+            continue;
+        }
+        let mut k = 0.5 * w.light_scale;
+        if l.flicker > 0.0 || (w.emergency > 0.0 && survivor) {
             let n = hash2((w.time * 14.0 + l.phase * 3.0) as i32, l.phase as i32, 7);
             let slow = ((w.time * 0.7 + l.phase).sin() * 0.5 + 0.5) > 0.25;
             k *= if slow && n > 0.15 { 1.0 } else { 0.12 };
@@ -739,6 +839,13 @@ fn draw_lights(w: &World, view: Rect) {
     }
     for l in &w.lights {
         light_circle(l.pos, l.radius, l.color, (l.life / l.max).clamp(0.0, 1.0) * 0.9);
+    }
+    if w.map.is_car && w.car_speed > 0.5 {
+        let len = w.map.w as f32;
+        for k in 0..3 {
+            let x = len - ((w.time * w.car_speed * 1.6 + k as f32 * len / 3.0) % len);
+            light_circle(vec2(x, 1.6), 1.6, Color::new(1.0, 0.85, 0.6, 1.0), 0.35);
+        }
     }
     for b in &w.bullets {
         light_circle(b.pos, 0.9, Color::new(1.0, 0.85, 0.5, 1.0), 0.3);

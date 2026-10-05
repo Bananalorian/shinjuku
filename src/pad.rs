@@ -7,6 +7,7 @@ use macroquad::prelude::*;
 pub const A: usize = 0;
 pub const B: usize = 1;
 pub const Y: usize = 3;
+pub const X: usize = 2;
 pub const LB: usize = 4;
 pub const RB: usize = 5;
 pub const RT: usize = 7;

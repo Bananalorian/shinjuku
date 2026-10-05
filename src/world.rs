@@ -25,7 +25,8 @@ pub struct Stats {
 
 impl Default for Stats {
     fn default() -> Self {
-        Stats { multishot: 1, dmg: 1.0, rate: 10.0, pierce: 1, gren_cd: 6.0, gren_radius: 2.6, max_hp: 100.0, speed: 4.6, dash_cd: 1.3 }
+        // the officer's pistol: steady, accurate, never runs dry
+        Stats { multishot: 1, dmg: 1.7, rate: 5.0, pierce: 0, gren_cd: 6.0, gren_radius: 2.6, max_hp: 100.0, speed: 4.6, dash_cd: 1.3 }
     }
 }
 
@@ -116,6 +117,61 @@ pub struct Grenade {
 pub struct Pickup {
     pub pos: Vec2,
     pub t: f32,
+    pub kind: PickupKind,
+    pub z: f32,
+    pub vz: f32,
+    pub vel: Vec2,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum PickupKind {
+    Onigiri,
+    Pistol,
+}
+
+impl Pickup {
+    pub fn new(pos: Vec2, kind: PickupKind) -> Self {
+        Pickup { pos, t: 0.0, kind, z: 0.0, vz: 0.0, vel: Vec2::ZERO }
+    }
+}
+
+/// People who aren't (yet) zombies: commuters, the officer, the dead.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum NpcState {
+    Stand,
+    Strap,
+    Sit,
+    Walk,
+    Ride,
+    Kneel,
+    Corpse,
+    Shoot,
+    Gone,
+}
+
+#[derive(Clone, Copy)]
+pub struct Npc {
+    pub pos: Vec2,
+    pub vel: Vec2,
+    pub home: Vec2,
+    pub look: usize,
+    pub state: NpcState,
+    pub anim: f32,
+    pub face_left: bool,
+    pub back: bool,
+    pub z: f32,
+    pub t: f32,
+    pub target: Vec2,
+    pub speed: f32,
+    pub officer: bool,
+    pub aim: Vec2,
+    pub after: NpcState, // what to become on reaching the target
+}
+
+impl Npc {
+    pub fn new(pos: Vec2, look: usize, state: NpcState) -> Self {
+        Npc { pos, vel: Vec2::ZERO, home: pos, look, state, anim: rnd(0.0, 4.0), face_left: chance(0.5), back: false, z: 0.0, t: rnd(0.0, 3.0), target: pos, speed: rnd(1.5, 2.1), officer: false, aim: Vec2::X, after: NpcState::Gone }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -224,6 +280,8 @@ pub struct Train {
     pub slices: Vec<SliceK>,
     pub stopped_t: f32,
     pub doors_open: bool,
+    /// Passing through (express, or leaving): removed once it's gone.
+    pub pass: bool,
 }
 
 impl Train {
@@ -237,6 +295,8 @@ impl Train {
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Phase {
+    /// The opening: no spawning, the intro script drives everything.
+    Intro,
     Fight,
     Boss,
     Train,
@@ -264,10 +324,15 @@ pub enum Sfx {
     Clear,
     Caw(Vec2),
     Zap(Vec2),
+    Quake,
+    Scream(Vec2),
+    Retch(Vec2),
+    Attract(Vec2),
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Event {
+    GotPistol,
     Boarded,
     Died,
     Won,
@@ -297,6 +362,17 @@ pub struct World {
     pub rings: Vec<Ring>,
     pub ghosts: Vec<Ghost>,
     pub birds: Vec<Bird>,
+    pub npcs: Vec<Npc>,
+    pub npc_field: Vec<u16>,
+    pub has_gun: bool,
+    pub locked: bool,
+    pub freeze: bool,
+    pub light_scale: f32,
+    pub emergency: f32,
+    pub player_z: f32,
+    pub player_lying: bool,
+    pub car_speed: f32,
+    pub car_doors_open: bool,
     kill_spots: Vec<Vec2>,
     bird_t: f32,
     loud: (Vec2, f32), // where and when something loud happened
@@ -357,12 +433,15 @@ fn gibs(ps: &mut Vec<Particle>, pos: Vec2, n: usize, power: f32) {
 
 impl World {
     pub fn new(station: usize, defs: &[StationDef], art: &crate::art::Art, stats: Stats, total_kills: u32, demo: bool) -> World {
-        let def = &defs[station];
         let next = match defs.get(station + 1) {
             Some(n) => format!("FOR {}", n.name),
             None => "OUT OF SERVICE".to_string(),
         };
-        let map = Map::build(def, station, &next, art);
+        Self::from_def(&defs[station], &next, station, art, stats, total_kills, demo)
+    }
+
+    pub fn from_def(def: &StationDef, next: &str, station: usize, art: &crate::art::Art, stats: Stats, total_kills: u32, demo: bool) -> World {
+        let map = Map::build(def, station, next, art);
         let start_y = if map.track_ys.len() >= 2 {
             (map.track_ys[0] + map.track_ys[1]) * 0.5
         } else {
@@ -406,6 +485,17 @@ impl World {
             rings: Vec::new(),
             ghosts: Vec::new(),
             birds: Vec::new(),
+            npcs: Vec::new(),
+            npc_field: Vec::new(),
+            has_gun: true,
+            locked: false,
+            freeze: false,
+            light_scale: 1.0,
+            emergency: 0.0,
+            player_z: 0.0,
+            player_lying: false,
+            car_speed: 0.0,
+            car_doors_open: false,
             kill_spots: Vec::new(),
             bird_t: 4.0,
             loud: (Vec2::ZERO, -99.0),
@@ -461,13 +551,16 @@ impl World {
         self.zombies.iter().find(|z| z.kind == ZKind::Boss && !z.dead)
     }
 
-    fn say(&mut self, title: &str, sub: &str, dur: f32) {
+    pub fn say(&mut self, title: &str, sub: &str, dur: f32) {
         self.msg = Some(Msg { title: title.to_string(), sub: sub.to_string(), t: 0.0, dur });
     }
 
     // ------------------------------------------------------------ main update
 
     pub fn update(&mut self, raw_dt: f32, c: &Controls) {
+        if self.freeze {
+            return;
+        }
         let dt = raw_dt.min(1.0 / 30.0) * self.slowmo;
         self.time += dt;
         self.phase_t += dt;
@@ -492,6 +585,7 @@ impl World {
         self.update_train(dt);
         self.update_particles(dt);
         self.update_birds(dt);
+        self.update_npcs(dt);
         self.update_atmosphere(dt);
         self.update_phase(dt);
 
@@ -546,7 +640,7 @@ impl World {
 
         let mut aim_screen = c.aim;
         let mut fire = c.fire;
-        if c.auto_aim && aim_screen.is_none() {
+        if c.auto_aim && aim_screen.is_none() && self.has_gun {
             // phones: lock onto the nearest zombie when the right stick is idle
             let mut best = 8.0f32;
             let mut tgt = None;
@@ -569,8 +663,11 @@ impl World {
             }
         }
 
-        let mv_world = if c.mv.length() > 0.05 { screen_to_world_dir(c.mv).normalize_or_zero() * c.mv.length().min(1.0) } else { Vec2::ZERO };
-        if c.dash && p.dash_cd <= 0.0 {
+        let mv_world = if c.mv.length() > 0.05 && !self.locked { screen_to_world_dir(c.mv).normalize_or_zero() * c.mv.length().min(1.0) } else { Vec2::ZERO };
+        if self.locked {
+            p.dash_t = 0.0;
+        }
+        if c.dash && p.dash_cd <= 0.0 && !self.locked {
             p.dash_t = 0.17;
             p.dash_cd = st.dash_cd;
             p.iframes = p.iframes.max(0.28);
@@ -603,7 +700,7 @@ impl World {
         p.back = p.aim_screen.y < -0.45;
 
         // shooting
-        if fire && p.fire_cd <= 0.0 {
+        if fire && p.fire_cd <= 0.0 && self.has_gun && !self.locked {
             p.fire_cd = 1.0 / st.rate;
             p.muzzle = 0.05;
             self.sfx.push(Sfx::Shot);
@@ -623,7 +720,7 @@ impl World {
             self.shake = (self.shake + 0.02).min(1.0);
         }
 
-        if c.grenade && p.gren_cd <= 0.0 {
+        if c.grenade && p.gren_cd <= 0.0 && self.has_gun && !self.locked {
             p.gren_cd = st.gren_cd;
             self.sfx.push(Sfx::Throw);
             self.grenades.push(Grenade { pos: p.pos + p.aim * 0.4, vel: p.aim * 7.2, z: 12.0, vz: 110.0, fuse: 0.95 });
@@ -853,7 +950,10 @@ impl World {
             z.pos += (z.vel + z.knock) * dt + push[i] * 0.6;
             self.map.resolve_ex(&mut z.pos, z.r.min(0.45), false, z.kind == ZKind::Boss);
             if let Some(t) = &self.train {
-                push_out_of_train(t, &mut z.pos, z.r);
+                // a moving train runs them down (see update_train); a stopped one is a wall
+                if t.head >= t.target {
+                    push_out_of_train(t, &mut z.pos, z.r);
+                }
             }
             z.anim += dt * (z.vel.length() * 2.6 + 0.3);
             let sd = world_to_screen_dir(z.vel);
@@ -904,7 +1004,7 @@ impl World {
         }
     }
 
-    fn hit_zombie(&mut self, i: usize, dmg: f32, dir: Vec2) {
+    pub fn hit_zombie(&mut self, i: usize, dmg: f32, dir: Vec2) {
         let z = &mut self.zombies[i];
         if z.dead {
             return;
@@ -956,7 +1056,7 @@ impl World {
             _ => 0.02,
         };
         if chance(drop) {
-            self.pickups.push(Pickup { pos, t: 0.0 });
+            self.pickups.push(Pickup::new(pos, PickupKind::Onigiri));
         }
         if kind == ZKind::Brute {
             self.shake = (self.shake + 0.2).min(1.0);
@@ -1124,27 +1224,163 @@ impl World {
         let mut got = Vec::new();
         for (i, k) in self.pickups.iter_mut().enumerate() {
             k.t += dt;
-            if k.pos.distance(ppos) < 0.65 && self.phase != Phase::Dead {
+            if k.z > 0.0 || k.vz != 0.0 {
+                k.vz -= 420.0 * dt;
+                k.z += k.vz * dt;
+                k.pos += k.vel * dt;
+                if k.z <= 0.0 {
+                    k.z = 0.0;
+                    k.vz = if k.vz.abs() > 60.0 { -k.vz * 0.35 } else { 0.0 };
+                    k.vel *= 0.4;
+                }
+            }
+            let reach = if k.kind == PickupKind::Pistol { 0.8 } else { 0.65 };
+            if k.pos.distance(ppos) < reach && k.z < 6.0 && self.phase != Phase::Dead {
                 got.push(i);
             }
         }
         for &i in got.iter().rev() {
-            let at = self.pickups[i].pos;
-            self.pickups.swap_remove(i);
+            let k = self.pickups.swap_remove(i);
+            let at = k.pos;
             self.sfx.push(Sfx::Pickup);
-            self.player.hp = (self.player.hp + 25.0).min(maxhp);
+            match k.kind {
+                PickupKind::Onigiri => self.player.hp = (self.player.hp + 25.0).min(maxhp),
+                PickupKind::Pistol => {
+                    self.has_gun = true;
+                    self.events.push(Event::GotPistol);
+                }
+            }
             for _ in 0..14 {
                 let d = rand_dir();
                 emit(&mut self.particles, particle(PK::Spark, at, 6.0, vec3(d.x * 1.5, d.y * 1.5, rnd(40.0, 120.0)), 0.5, 1.0, Color::new(0.5, 1.0, 0.6, 1.0)));
             }
             self.lights.push(TempLight { pos: at, radius: 2.0, color: Color::new(0.5, 1.0, 0.6, 1.0), life: 0.4, max: 0.4 });
         }
-        self.pickups.retain(|k| k.t < 18.0);
+        self.pickups.retain(|k| k.t < 18.0 || k.kind == PickupKind::Pistol);
+    }
+
+    /// Fire a bullet from anyone (the officer in the opening).
+    pub fn fire_bullet(&mut self, from: Vec2, dir: Vec2, dmg: f32) {
+        let d = dir.normalize_or_zero();
+        self.bullets.push(Bullet { pos: from + d * 0.5, vel: d * 26.0, life: 0.85, dmg, pierce: 0, hits: [0; 8], nh: 0 });
+        self.muzzle(from + d * 0.5);
+        self.sfx.push(Sfx::Shot);
+    }
+
+    /// Effects the opening script needs.
+    pub fn blood_burst(&mut self, at: Vec2, dir: Vec2, n: usize) {
+        blood_spray(&mut self.particles, at, 10.0, dir, n, 1.2);
+        gibs(&mut self.particles, at, n / 4, 1.0);
+        self.map.stamp(at, 0.8, 0);
+    }
+
+    pub fn vomit(&mut self, at: Vec2, dir: Vec2) {
+        for _ in 0..3 {
+            let d = (dir + rand_dir() * 0.3).normalize_or_zero();
+            let c = Color::new(rnd(0.55, 0.7), rnd(0.6, 0.72), rnd(0.2, 0.3), 1.0);
+            emit(&mut self.particles, particle(PK::Blood, at + dir * 0.2, 9.0, vec3(d.x * rnd(0.8, 1.6), d.y * rnd(0.8, 1.6), rnd(10.0, 40.0)), 0.6, rnd(1.0, 2.0), c));
+        }
+    }
+
+    pub fn muzzle(&mut self, at: Vec2) {
+        self.lights.push(TempLight { pos: at, radius: 2.8, color: Color::new(1.0, 0.8, 0.45, 1.0), life: 0.06, max: 0.06 });
+        emit(&mut self.particles, particle(PK::Flash, at, 10.0, Vec3::ZERO, 0.05, 6.0, Color::new(1.0, 0.85, 0.5, 1.0)));
+        self.loud = (at, self.time);
+    }
+
+    pub fn spawn_train(&mut self, y: f32, head: f32, target: f32, doors_open: bool, pass: bool) {
+        let slices: Vec<SliceK> = train_pattern()
+            .iter()
+            .map(|k| match k {
+                0 => SliceK::Cab,
+                2 => SliceK::Door,
+                3 => SliceK::Gap,
+                _ => SliceK::Body,
+            })
+            .collect();
+        self.train = Some(Train { head, target, y, slices, stopped_t: if doors_open { 9.0 } else { 0.0 }, doors_open, pass });
+    }
+
+    fn update_npcs(&mut self, dt: f32) {
+        let n = self.npcs.len();
+        let snapshot: Vec<(Vec2, NpcState)> = self.npcs.iter().map(|k| (k.pos, k.state)).collect();
+        let field = std::mem::take(&mut self.npc_field);
+        for i in 0..n {
+            let mut k = self.npcs[i];
+            k.t += dt;
+            match k.state {
+                NpcState::Stand | NpcState::Strap => {
+                    k.vel += (k.home - k.pos) * 5.0 * dt;
+                    k.vel *= (-3.5 * dt).exp();
+                    k.pos += k.vel * dt;
+                }
+                NpcState::Sit | NpcState::Kneel | NpcState::Corpse | NpcState::Gone => {}
+                NpcState::Shoot => {
+                    k.face_left = world_to_screen_dir(k.aim).x < 0.0;
+                }
+                NpcState::Walk => {
+                    let to = k.target - k.pos;
+                    let dir = if !field.is_empty() && to.length() > 1.5 {
+                        self.map.dir_in(&field, k.pos).unwrap_or(to.normalize_or_zero())
+                    } else {
+                        to.normalize_or_zero()
+                    };
+                    let mut push = Vec2::ZERO;
+                    for (j, (q, st)) in snapshot.iter().enumerate() {
+                        if j != i && matches!(st, NpcState::Walk | NpcState::Stand) {
+                            let d = k.pos - *q;
+                            let l = d.length();
+                            if l < 0.5 && l > 1e-4 {
+                                push += d / l * (0.5 - l);
+                            }
+                        }
+                    }
+                    k.vel += (dir * k.speed - k.vel) * (1.0 - (-6.0 * dt).exp());
+                    k.pos += k.vel * dt + push * 0.5;
+                    self.map.resolve(&mut k.pos, 0.22, false);
+                    k.anim += dt * k.vel.length() * 2.6;
+                    let sd = world_to_screen_dir(k.vel);
+                    if sd.x.abs() > 0.3 {
+                        k.face_left = sd.x < 0.0;
+                    }
+                    k.back = sd.y < -1.5;
+                    if to.length() < 0.45 {
+                        k.state = k.after;
+                        k.t = 0.0;
+                        k.home = k.pos;
+                    }
+                }
+                NpcState::Ride => {
+                    if let Some((a, b)) = self.map.escalator {
+                        let f = (k.t / 3.2).min(1.0);
+                        k.pos = a.lerp(b, f);
+                        k.z = f * crate::art::esc_height(crate::art::ESC_SLICES - 1) + 2.0;
+                        k.anim += dt * 2.0;
+                        k.face_left = false;
+                        k.back = true;
+                        if f >= 1.0 {
+                            k.state = NpcState::Gone;
+                        }
+                    } else {
+                        k.state = NpcState::Gone;
+                    }
+                }
+            }
+            self.npcs[i] = k;
+        }
+        self.npc_field = field;
+        self.npcs.retain(|k| k.state != NpcState::Gone);
     }
 
     // ------------------------------------------------------------ the train
 
     fn update_train(&mut self, dt: f32) {
+        if let Some(t) = &self.train {
+            if t.pass && t.tail() > self.map.gw as f32 + 2.0 {
+                self.train = None;
+                return;
+            }
+        }
         let Some(t) = &mut self.train else { return };
         if t.head < t.target {
             let sp = ((t.target - t.head) * 1.3).clamp(2.2, 22.0);
@@ -1163,7 +1399,7 @@ impl World {
             let ids: Vec<usize> = (0..self.zombies.len())
                 .filter(|&i| {
                     let z = &self.zombies[i];
-                    !z.dead && z.kind != ZKind::Boss && (z.pos.y - ty).abs() < 0.9 && z.pos.x < head + 0.3 && z.pos.x > tail
+                    !z.dead && z.kind != ZKind::Boss && (z.pos.y - ty).abs() < 1.0 && z.pos.x < head + 0.3 && z.pos.x > tail
                 })
                 .collect();
             for i in ids {
@@ -1230,7 +1466,7 @@ impl World {
                         })
                         .collect();
                     let target = train_stop_head(self.map.w);
-                    self.train = Some(Train { head: 0.0, target, y, slices, stopped_t: 0.0, doors_open: false });
+                    self.train = Some(Train { head: 0.0, target, y, slices, stopped_t: 0.0, doors_open: false, pass: false });
                     self.sfx.push(Sfx::Horn);
                     self.sfx.push(Sfx::Train);
                     self.shake = 0.3;
@@ -1251,7 +1487,7 @@ impl World {
                     self.events.push(Event::Won);
                 }
             }
-            Phase::Boss => {}
+            Phase::Boss | Phase::Intro => {}
         }
     }
 
