@@ -1,7 +1,7 @@
 //! Station definitions and map building: the baked floor/wall image, props,
 //! lights, spawn points, collision, and the zombie flow field.
 
-use crate::art::{build_signs, esc_height, Art, SignArt, ESC_SLICES};
+use crate::art::{build_signs, Art, SignArt};
 use crate::font;
 use crate::util::*;
 use macroquad::prelude::*;
@@ -261,6 +261,7 @@ pub struct Obstacle {
 }
 
 #[derive(Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 pub enum PropKind {
     Pillar,
     Vending(usize),
@@ -454,7 +455,7 @@ impl Map {
 
         let neon = |i: u32| def.neon[(i as usize) % def.neon.len().max(1)];
         let mut k = 0u32;
-        let mut escalator = None;
+        let escalator = None;
         let mut arcade = None;
         if def.car {
             // seats along both sides between the doors, straps, hanging ads, ceiling lights
@@ -499,24 +500,7 @@ impl Map {
             }
         }
         if def.intro_props {
-            // escalator rising east along the front platform, and an arcade cabinet in the corner
-            if let Some((_, y0, y1)) = band_ranges.iter().rev().find(|b| b.0 == Band::Platform) {
-                let yc = (*y0 + *y1) as f32 * 0.5 + 0.6;
-                let x0 = w as f32 - 2.0 - ESC_SLICES as f32 * 0.5;
-                for i in 0..ESC_SLICES {
-                    let x = x0 + i as f32 * 0.5;
-                    let _ = esc_height(i);
-                    props.push(Prop { kind: PropKind::EscRail(i), pos: vec2(x, yc - 0.6), size: vec2(0.5, 0.1) });
-                    props.push(Prop { kind: PropKind::EscStep(i), pos: vec2(x, yc - 0.5), size: vec2(0.5, 1.0) });
-                    props.push(Prop { kind: PropKind::EscRail(i), pos: vec2(x, yc + 0.5), size: vec2(0.5, 0.1) });
-                }
-                let len = ESC_SLICES as f32 * 0.5;
-                obstacles.push(Obstacle { min: vec2(x0, yc - 0.6), max: vec2(x0 + len, yc + 0.6), low: false });
-                escalator = Some((vec2(x0 - 0.35, yc), vec2(x0 + len, yc)));
-                lights.push(LightDef { pos: vec2(x0 - 0.8, yc), radius: 2.8, color: rgb(255, 250, 235), flicker: 0.0, phase: 0.0, strobe: false });
-                lights.push(LightDef { pos: vec2(x0 + len * 0.5, yc + 1.0), radius: 3.0, color: rgb(230, 240, 255), flicker: 0.0, phase: 0.0, strobe: false });
-                lights.push(LightDef { pos: vec2(x0 + len, yc), radius: 2.4, color: rgb(255, 255, 255), flicker: 0.0, phase: 0.0, strobe: false });
-            }
+            // an arcade cabinet in the corner of the middle platform
             if let Some((_, y0, y1)) = band_ranges.iter().find(|b| b.0 == Band::Platform && b.1 > 1) {
                 let c = vec2(2.1, (*y0 + *y1) as f32 * 0.5 - 0.35);
                 props.push(Prop { kind: PropKind::Cabinet, pos: c - vec2(0.4, 0.35), size: vec2(0.8, 0.7) });
@@ -581,9 +565,7 @@ impl Map {
                     } else {
                         let mut x = 4.0;
                         while x < w as f32 - 2.0 {
-                            if !(def.intro_props && x > w as f32 - 12.0) {
-                                add_prop(PropKind::Pillar, vec2(x, yc + 0.5), vec2(0.75, 0.75), true, &mut props, &mut obstacles);
-                            }
+                            add_prop(PropKind::Pillar, vec2(x, yc + 0.5), vec2(0.75, 0.75), true, &mut props, &mut obstacles);
                             x += 6.5;
                         }
                     }
@@ -615,73 +597,78 @@ impl Map {
             }
         }
 
-        // ---- campaign maze: shuttered shops and passages below the platforms
+        // ---- campaign underground: big halls off a central passage, like a subway concourse
         if def.maze {
             if let Some((_, c0, c1)) = band_ranges.iter().find(|b| b.0 == Band::Concourse) {
-                let top = *c0 + 4; // leave room for the ticket gates
-                let cell = 4;
-                let cols = ((w - 2) / cell) as usize;
-                let rows = ((c1 - top) / cell) as usize;
-                // recursive backtracker on a coarse grid, then knock out extra walls for loops
-                let mut seen = vec![false; cols * rows];
-                let mut open_e = vec![false; cols * rows];
-                let mut open_s = vec![false; cols * rows];
                 let mut rng = Lcg(seed.wrapping_mul(97));
-                let mut stack = vec![(0usize, 0usize)];
-                seen[0] = true;
-                while let Some(&(cx, cy)) = stack.last() {
-                    let mut nb = Vec::new();
-                    if cx + 1 < cols && !seen[cy * cols + cx + 1] { nb.push((cx + 1, cy, 0)); }
-                    if cx > 0 && !seen[cy * cols + cx - 1] { nb.push((cx - 1, cy, 1)); }
-                    if cy + 1 < rows && !seen[(cy + 1) * cols + cx] { nb.push((cx, cy + 1, 2)); }
-                    if cy > 0 && !seen[(cy - 1) * cols + cx] { nb.push((cx, cy - 1, 3)); }
-                    if nb.is_empty() {
-                        stack.pop();
-                        continue;
-                    }
-                    let (nx, ny, d) = nb[(rng.f() * nb.len() as f32) as usize % nb.len()];
-                    match d {
-                        0 => open_e[cy * cols + cx] = true,
-                        1 => open_e[cy * cols + nx] = true,
-                        2 => open_s[cy * cols + cx] = true,
-                        _ => open_s[ny * cols + cx] = true,
-                    }
-                    seen[ny * cols + nx] = true;
-                    stack.push((nx, ny));
-                }
-                for i in 0..cols * rows {
-                    if rng.f() < 0.3 { open_e[i] = true; }
-                    if rng.f() < 0.3 { open_s[i] = true; }
-                }
+                let top = *c0 + 4; // room for the ticket gates
+                let bottom = *c1;
+                let span = bottom - top;
+                // two rows of halls with a 4-tile passage between them
+                let row1 = top + (span - 4) / 2;
+                let hall_a = (top, row1);
+                let hall_b = (row1 + 5, bottom);
                 let wall = |tx: i32, ty: i32, props: &mut Vec<Prop>, obstacles: &mut Vec<Obstacle>| {
                     let kind = ((tx * 7 + ty * 13).rem_euclid(5) as usize).min(2);
                     props.push(Prop { kind: PropKind::MazeWall(kind), pos: vec2(tx as f32, ty as f32), size: vec2(1.0, 1.0) });
                     obstacles.push(Obstacle { min: vec2(tx as f32, ty as f32), max: vec2(tx as f32 + 1.0, ty as f32 + 1.0), low: false });
                 };
-                let ox = 1 + ((w - 2) - cols as i32 * cell) / 2;
-                for cy in 0..rows {
-                    for cx in 0..cols {
-                        let x0 = ox + cx as i32 * cell;
-                        let y0 = top + cy as i32 * cell;
-                        // east wall of the cell, with a 2-tile doorway if open
-                        if cx + 1 < cols {
-                            for k in 0..cell {
-                                let gap = open_e[cy * cols + cx] && (1..3).contains(&k);
-                                if !gap { wall(x0 + cell - 1, y0 + k, &mut props, &mut obstacles); }
+                // the passage walls, with a wide opening into every hall
+                let mut cuts = vec![1];
+                let mut x = 1;
+                while x < w - 6 {
+                    x += 9 + (rng.f() * 6.0) as i32;
+                    cuts.push(x.min(w - 1));
+                }
+                cuts.push(w);
+                for (y_wall, hall) in [(row1, hall_a), (row1 + 4, hall_b)] {
+                    for pair in cuts.windows(2) {
+                        let (a, b) = (pair[0], pair[1]);
+                        let door = a + (b - a) / 2 - 1 + (rng.f() * 3.0) as i32 - 1;
+                        let open_wide = rng.f() < 0.2; // sometimes the hall just opens straight onto the passage
+                        for tx in a..b {
+                            let in_door = (door..door + 3).contains(&tx) || open_wide;
+                            if !in_door && tx >= 1 && tx < w {
+                                wall(tx, y_wall, &mut props, &mut obstacles);
                             }
-                        }
-                        if cy + 1 < rows {
-                            for k in 0..cell - 1 {
-                                let gap = open_s[cy * cols + cx] && (1..3).contains(&k);
-                                if !gap { wall(x0 + k, y0 + cell - 1, &mut props, &mut obstacles); }
-                            }
-                        }
-                        // neon from the shopfronts
-                        if rng.f() < 0.55 {
-                            let c = def.neon[(rng.f() * def.neon.len() as f32) as usize % def.neon.len()];
-                            lights.push(LightDef { pos: vec2(x0 as f32 + 1.5, y0 as f32 + 1.5), radius: 3.0, color: c, flicker: if rng.f() < def.flicker { 1.0 } else { 0.0 }, phase: rng.f() * 10.0, strobe: false });
                         }
                     }
+                    // walls between the halls, each with a doorway
+                    for &cx in &cuts[1..cuts.len() - 1] {
+                        let (y0, y1) = (hall.0.min(hall.1), hall.0.max(hall.1));
+                        let door = y0 + (y1 - y0) / 2 - 1;
+                        for ty in y0..y1 {
+                            if !(door..door + 3).contains(&ty) && ty != y_wall {
+                                wall(cx, ty, &mut props, &mut obstacles);
+                            }
+                        }
+                    }
+                    // inside each hall: square columns in the big ones, lights, the odd kiosk
+                    for pair in cuts.windows(2) {
+                        let (a, b) = (pair[0] + 1, pair[1]);
+                        let (y0, y1) = (hall.0.min(hall.1), hall.0.max(hall.1));
+                        let wide = b - a >= 10;
+                        if wide {
+                            let mut px = a + 3;
+                            while px < b - 2 {
+                                let py = (y0 + y1) / 2;
+                                if rng.f() < 0.8 {
+                                    add_prop(PropKind::Pillar, vec2(px as f32 + 0.5, py as f32 + 0.5), vec2(0.75, 0.75), true, &mut props, &mut obstacles);
+                                }
+                                px += 4;
+                            }
+                        }
+                        let c = def.neon[(rng.f() * def.neon.len() as f32) as usize % def.neon.len()];
+                        let mid = vec2((a + b) as f32 * 0.5, (y0 + y1) as f32 * 0.5);
+                        lights.push(LightDef { pos: mid + vec2(-2.0, -1.5), radius: 3.6, color: def.lamp, flicker: if rng.f() < def.flicker { 1.0 } else { 0.0 }, phase: rng.f() * 10.0, strobe: false });
+                        lights.push(LightDef { pos: mid + vec2(2.0, 1.5), radius: 3.0, color: c, flicker: 0.0, phase: 0.0, strobe: false });
+                    }
+                }
+                // lights down the passage
+                let mut x = 3.0;
+                while x < w as f32 {
+                    lights.push(LightDef { pos: vec2(x, row1 as f32 + 2.5), radius: 2.8, color: def.lamp, flicker: if rng.f() < def.flicker { 1.0 } else { 0.0 }, phase: x, strobe: false });
+                    x += 5.0;
                 }
             }
         }

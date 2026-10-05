@@ -249,6 +249,7 @@ impl Fx {
         set_camera(&rt_cam(&self.scene, vw, vh, tl));
         clear_background(BLACK);
         draw_texture(&w.map.floor_tex, w.map.origin.x, w.map.origin.y, WHITE);
+        draw_car_outside(w, art);
         draw_rings(w, art);
         draw_sorted(w, art, view);
         draw_xray(w, art);
@@ -723,6 +724,41 @@ fn draw_particles(w: &World, art: &Art, additive: bool, view: Rect) {
             }
         }
     }
+}
+
+/// Beyond the car's open side: the tunnel wall streaking past while the train moves.
+/// When the train stops, it fades away and you see the platform.
+fn draw_car_outside(w: &World, art: &Art) {
+    if !w.map.is_car {
+        return;
+    }
+    let k = (w.car_speed / 4.0).clamp(0.0, 1.0);
+    if k <= 0.0 {
+        return;
+    }
+    let (h, gw, gh) = (w.map.h as f32 + 0.05, w.map.gw as f32 + 4.0, w.map.gh as f32 + 4.0);
+    let (a, b, c, d) = (iso(-4.0, h), iso(gw, h), iso(gw, gh), iso(-4.0, gh));
+    let dark = Color::new(0.03, 0.03, 0.04, k);
+    draw_triangle(a, b, c, dark);
+    draw_triangle(a, c, d, dark);
+    let (e, f, g, hh) = (iso(w.map.w as f32 + 0.1, 0.0), iso(gw, 0.0), iso(gw, h), iso(w.map.w as f32 + 0.1, h));
+    draw_triangle(e, f, g, dark);
+    draw_triangle(e, g, hh, dark);
+    // motion-blurred streaks: wall seams, cable runs and the odd lamp, all sliding past
+    let len = gw + 4.0;
+    for i in 0..26 {
+        let y = h + 0.3 + (i % 9) as f32 * 0.55 + (i / 9) as f32 * 0.17;
+        let speed = w.car_speed * (1.4 + (i % 3) as f32 * 0.25);
+        let x = len - ((w.time * speed + i as f32 * 7.3) % (len + 8.0)) - 4.0;
+        let streak = (w.car_speed * 0.5).clamp(1.0, 5.0) + (i % 4) as f32;
+        let p0 = iso(x, y);
+        let p1 = iso(x + streak, y);
+        let lamp = i % 7 == 0;
+        let col = if lamp { Color::new(1.0, 0.85, 0.55, 0.55 * k) } else { Color::new(0.35, 0.36, 0.42, 0.45 * k) };
+        let thick = if lamp { 2.0 } else { 1.0 };
+        draw_line(p0.x, p0.y, p1.x, p1.y, thick, col);
+    }
+    let _ = art;
 }
 
 /// Tunnel lights streaking past the car windows while the train moves.

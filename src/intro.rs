@@ -17,7 +17,7 @@ pub enum Stage {
     CarRide,
     CarArrive,
     Platform,
-    Escalator,
+    Quake,
     Blackout,
     Wake,
     Explore,
@@ -193,9 +193,9 @@ impl Intro {
         w.has_gun = false;
         w.has_light = false;
         w.light_on = false;
-        // where the officer makes his stand: the middle platform, east of the arcade
+        // where the officer makes his stand: the far platform, top right of the station
         if let Some(y) = w.map.track_ys.first() {
-            self.cop_spot = vec2(w.map.w as f32 * 0.55, y + 4.4);
+            self.cop_spot = vec2(w.map.w as f32 - 5.0, (y - 1.5) * 0.5 + 1.2);
         }
         w.locked = false;
         w.birds.clear();
@@ -204,25 +204,25 @@ impl Intro {
         w.spawn_train(ty, head, head, true, false);
         let doors = door_xs(w.map.w);
         let edge = ty + 1.5;
-        let mine = doors[doors.len() / 2];
+        let mine = doors[doors.len().saturating_sub(2)]; // a door toward the west end, so the walk east is a real walk
         w.player.pos = vec2(mine, edge + 0.55);
         w.player.vel = Vec2::ZERO;
         w.player.iframes = 0.0;
         w.cam = iso(w.player.pos.x, w.player.pos.y);
-        if let Some((bottom, _)) = w.map.escalator {
-            w.npc_field = w.map.bfs(bottom);
-            for i in 0..22 {
-                let d = doors[i % doors.len()];
-                let p = vec2(d + rnd(-0.3, 0.3), edge + rnd(0.45, 1.3));
-                let mut n = Npc::new(p, i, NpcState::Stand);
-                n.t = -rnd(0.0, 4.0); // staggered start
-                n.target = bottom;
-                n.after = NpcState::Ride;
-                w.npcs.push(n);
-            }
-            self.marker = Some(bottom);
+        // everyone heads east along the platform, toward the exits at the far end
+        let exit = vec2(w.map.w as f32 + 3.0, edge + 2.8);
+        w.npc_field = w.map.bfs(vec2(w.map.w as f32 + 1.5, edge + 2.8));
+        for i in 0..22 {
+            let d = doors[i % doors.len()];
+            let p = vec2(d + rnd(-0.3, 0.3), edge + rnd(0.45, 1.3));
+            let mut n = Npc::new(p, i, NpcState::Stand);
+            n.t = -rnd(0.0, 3.0); // staggered start
+            n.target = exit + vec2(0.0, rnd(-1.2, 1.2));
+            n.after = NpcState::Gone;
+            w.npcs.push(n);
         }
-        self.objective = Some("FOLLOW THE CROWD TO THE ESCALATOR");
+        self.marker = Some(vec2(w.map.w as f32 - 2.0, edge + 2.8));
+        self.objective = Some("FOLLOW THE CROWD");
         self.go(Stage::Platform);
         self.black = 1.0;
     }
@@ -230,6 +230,7 @@ impl Intro {
     /// After the quake: the dark, the dead, and someone being sick in the corner.
     pub fn setup_aftermath(&mut self, w: &mut World) {
         w.train = None;
+        let crowd: Vec<(Vec2, usize)> = w.npcs.iter().map(|n| (n.pos, n.look)).collect();
         w.npcs.clear();
         w.light_scale = 1.0;
         w.emergency = 1.0;
@@ -237,15 +238,24 @@ impl Intro {
         w.player_lying = true;
         w.locked = true;
         w.shake = 0.0;
-        let (bottom, _) = w.map.escalator.unwrap_or((w.player.pos, w.player.pos));
-        w.player.pos = bottom + vec2(-1.0, 0.4);
         w.cam = iso(w.player.pos.x, w.player.pos.y);
         let ty = *w.map.track_ys.last().unwrap_or(&18.5);
         let edge = ty + 1.5;
         let h = w.map.h as f32;
+        // the crowd you followed, where they fell
+        for (p, look) in crowd {
+            if p.x > w.map.w as f32 - 0.5 || w.map.solid_at(p) {
+                continue;
+            }
+            let mut n = Npc::new(p, look, NpcState::Corpse);
+            n.face_left = chance(0.5);
+            n.loot = if chance(0.4) { 0 } else { rand::gen_range(3, 20) };
+            w.npcs.push(n);
+            w.map.stamp(p, rnd(0.5, 0.9), 2);
+        }
         let mut placed = 0;
         let mut tries = 0;
-        while placed < 14 && tries < 300 {
+        while placed < 6 && tries < 200 {
             tries += 1;
             let p = vec2(rnd(4.0, w.map.w as f32 - 2.0), rnd(edge + 0.6, h - 0.8));
             if w.map.solid_at(p) || p.distance(w.player.pos) < 1.5 {
@@ -381,10 +391,6 @@ impl Intro {
                         n.state = NpcState::Walk;
                         n.speed = rnd(1.3, 1.9);
                     }
-                    // the escalator only takes one person at a time
-                    if n.state == NpcState::Ride && n.t < 0.02 {
-                        n.t = 0.02;
-                    }
                 }
                 if self.t > 12.0 {
                     if let Some(t) = &mut w.train {
@@ -396,48 +402,53 @@ impl Intro {
                         }
                     }
                 }
-                if let Some((bottom, _)) = w.map.escalator {
-                    if w.player.pos.distance(bottom) < 0.9 {
-                        w.locked = true;
-                        self.objective = None;
-                        self.marker = None;
-                        self.prompt = None;
-                        self.go(Stage::Escalator);
-                    }
+                // partway down the platform, the ground starts to move
+                if (w.player.pos.x > w.map.w as f32 - 6.0 || self.t > 30.0) && self.t > 5.0 {
+                    w.locked = true;
+                    self.objective = None;
+                    self.marker = None;
+                    self.prompt = None;
+                    self.go(Stage::Quake);
                 }
             }
-            Stage::Escalator => {
-                if let Some((a, b)) = w.map.escalator {
-                    let ride = 8.5;
-                    let f = (self.t / ride).min(1.0);
-                    w.player.pos = a.lerp(b, f);
-                    w.player.vel = Vec2::ZERO;
-                    w.player_z = f * crate::art::esc_height(crate::art::ESC_SLICES - 1) + 2.0;
-                    w.player.aim_screen = vec2(0.4, -0.9).normalize();
-                    w.cam_focus = Some(w.player.pos);
-                    // a third of the way up, the ground starts to shake
-                    let quake_at = 3.2;
-                    if self.t > quake_at && self.t - dt <= quake_at {
-                        w.sfx.push(Sfx::Quake);
-                        self.say("YOU", "...?");
-                    }
-                    if self.t > quake_at {
-                        w.shake = (w.shake + dt * 0.8).min(1.0);
-                        let wild = ((self.t - quake_at) / 3.0).min(1.0);
-                        w.light_scale = if chance(0.12 + wild * 0.3) { rnd(0.0, 0.4) } else { rnd(0.7, 1.0) };
-                        if chance(dt * 2.0) {
-                            let p = w.player.pos + rand_dir() * rnd(3.0, 8.0);
-                            w.sfx.push(Sfx::Scream(p));
+            Stage::Quake => {
+                w.player.vel *= 0.5;
+                if self.t > 0.3 && self.t - dt <= 0.3 {
+                    w.sfx.push(Sfx::Quake);
+                    self.say("YOU", "...?");
+                }
+                let wild = (self.t / 3.0).min(1.0);
+                w.shake = (w.shake + dt * 0.9).min(1.0);
+                w.light_scale = if chance(0.1 + wild * 0.35) { rnd(0.0, 0.4) } else { rnd(0.7, 1.0) };
+                if chance(dt * 2.5) {
+                    let p = w.player.pos + rand_dir() * rnd(2.0, 7.0);
+                    w.sfx.push(Sfx::Scream(p));
+                }
+                // the crowd panics: some run, some go down
+                if self.t > 1.2 && self.t - dt <= 1.2 {
+                    let ppos = w.player.pos;
+                    for n in w.npcs.iter_mut() {
+                        if chance(0.35) {
+                            n.state = NpcState::Corpse;
+                            n.face_left = chance(0.5);
+                        } else {
+                            n.state = NpcState::Walk;
+                            n.target = n.pos + rand_dir() * rnd(2.0, 5.0) + (n.pos - ppos).normalize_or_zero();
+                            n.speed = rnd(2.8, 3.8);
+                            n.after = NpcState::Corpse;
                         }
                     }
-                    if self.t > quake_at + 3.6 {
-                        w.light_scale = 0.0;
-                        self.black = ((self.t - quake_at - 3.6) * 1.2).min(1.0);
-                    }
-                    if self.t > quake_at + 4.6 {
-                        w.cam_focus = None;
-                        self.go(Stage::Blackout);
-                    }
+                    w.npc_field.clear();
+                }
+                if self.t > 3.4 && !w.player_lying {
+                    w.player_lying = true; // knocked off your feet
+                }
+                if self.t > 4.2 {
+                    w.light_scale = 0.0;
+                    self.black = ((self.t - 4.2) * 1.2).min(1.0);
+                }
+                if self.t > 5.2 {
+                    self.go(Stage::Blackout);
                 }
             }
             Stage::Blackout => {
@@ -590,7 +601,7 @@ impl Intro {
                     if self.start_ambush(w) {
                         self.go(Stage::Ambush);
                     }
-                } else if self.arcade_played && self.objective != Some("FIND A WAY OUT") {
+                } else if (self.arcade_played || self.explore_t > 30.0) && self.objective != Some("FIND A WAY OUT") {
                     self.objective = Some("FIND A WAY OUT");
                     self.marker = Some(self.cop_spot);
                 }
@@ -609,8 +620,8 @@ impl Intro {
                     z.speed = 0.0;
                     let d = opos - z.pos;
                     if d.length() > 0.6 {
-                        z.pos += d.normalize() * 0.85 * dt;
-                        z.vel = d.normalize() * 0.85;
+                        z.pos += d.normalize() * 0.5 * dt;
+                        z.vel = d.normalize() * 0.5;
                     }
                     let dist = d.length();
                     if nearest.map_or(true, |(_, nd)| dist < nd) {
@@ -620,9 +631,9 @@ impl Intro {
                 if self.t > 0.6 && self.t - dt <= 0.6 {
                     self.say("OFFICER", "STAY BACK! I SAID STAY BACK!");
                 }
-                if self.t > 4.0 && self.t - dt <= 4.0 {
+                if self.t > 5.5 && self.t - dt <= 5.5 {
                     // more of them shamble out of the dark
-                    let away = (opos - w.player.pos).normalize_or_zero();
+                    let away = vec2(1.0, -0.15).normalize();
                     for j in 0..2 {
                         let zp = opos + away * 4.5 + vec2(-away.y, away.x) * (j as f32 * 2.0 - 1.0) * 1.4;
                         w.add_zombie(ZKind::Walker, zp);
@@ -638,12 +649,12 @@ impl Intro {
                     if let Some(n) = w.npcs.get_mut(oi) {
                         n.aim = zp - opos;
                     }
-                    if self.shot_t <= 0.0 && self.shots < 7 && self.t > 1.0 {
-                        self.shot_t = 0.75;
+                    if self.shot_t <= 0.0 && self.shots < 9 && self.t > 1.2 {
+                        self.shot_t = 1.1;
                         self.shots += 1;
                         w.fire_bullet(opos, zp - opos, 1.2);
                     }
-                    if dist < 0.75 && self.t > 6.0 {
+                    if dist < 0.75 && self.t > 10.0 {
                         self.say("OFFICER", "KID! IT'S TOO DANGEROUS HERE... TAKE THIS!");
                         let to = w.player.pos - opos;
                         let land = opos + to * 0.8;
@@ -774,7 +785,7 @@ impl Intro {
         let p = w.player.pos;
         for k in 0..41 {
             let a = k as f32 * 0.7;
-            let spot = if k == 0 && self.cop_spot.distance(p) < 10.0 { self.cop_spot } else { p + vec2(a.cos(), a.sin()) * rnd(6.0, 8.0) };
+            let spot = if k == 0 { self.cop_spot } else { self.cop_spot + vec2(a.cos(), a.sin()) * rnd(0.5, 2.0) };
             if spot.x < 2.5 || spot.y < 2.0 || spot.x > w.map.w as f32 - 2.0 || spot.y > w.map.h as f32 - 1.0 {
                 continue;
             }
@@ -786,9 +797,10 @@ impl Intro {
             w.npcs.push(n);
             self.officer = Some(w.npcs.len() - 1);
             self.marker = None;
-            let away = (spot - p).normalize_or_zero();
+            let _ = p;
+            let away = vec2(1.0, -0.15).normalize(); // they come out of the dark at the east end
             for j in 0..3 {
-                let zp = spot + away * rnd(2.8, 3.6) + vec2(-away.y, away.x) * (j as f32 - 1.0) * 1.2;
+                let zp = spot + away * rnd(3.2, 4.0) + vec2(-away.y, away.x) * (j as f32 - 1.0) * 1.1;
                 w.add_zombie(ZKind::Walker, zp);
                 if let Some(z) = w.zombies.last_mut() {
                     z.age = 1.0;

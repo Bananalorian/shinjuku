@@ -146,6 +146,7 @@ impl Pickup {
 
 /// People who aren't (yet) zombies: commuters, the officer, the dead.
 #[derive(Clone, Copy, PartialEq, Debug)]
+#[allow(dead_code)]
 pub enum NpcState {
     Stand,
     Strap,

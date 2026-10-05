@@ -275,7 +275,7 @@ impl Game {
             Scene::Intro => match self.intro.as_ref().map(|i| i.stage) {
                 Some(intro::Stage::CarRide) | Some(intro::Stage::CarArrive) => &[(Id::Ride, 0.45)],
                 Some(intro::Stage::Platform) => &[(Id::Hum, 0.16), (Id::Ambient, 0.18)],
-                Some(intro::Stage::Escalator) | Some(intro::Stage::Blackout) => &[],
+                Some(intro::Stage::Quake) | Some(intro::Stage::Blackout) => &[],
                 Some(intro::Stage::Armed) | Some(intro::Stage::Done) => &[(Id::Music, 0.22), (Id::Hum, 0.06)],
                 _ => &[(Id::Hum, 0.07)],
             },
@@ -683,8 +683,8 @@ fn intro_autopilot(game: &mut Game, frame: u32) -> Controls {
             c.mv = toward(vec2(d, w.map.h as f32));
         }
         Platform => {
-            if let Some((b, _)) = w.map.escalator {
-                c.mv = toward(b);
+            if let Some(m) = it.marker {
+                c.mv = toward(m);
             }
         }
         Explore => {

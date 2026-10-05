@@ -33,13 +33,14 @@ crows picking at whatever the horde left behind.
 
 ## The campaign
 
-It starts on a crowded Yamanote line car pulling into Kanda. You get off with the
-crowd and head up the escalator just as a quake hits and the lights go out. You
+It starts on a crowded Yamanote line car pulling into Kanda. You get off and
+follow the crowd down the platform until a quake hits and the lights go out. You
 wake up among the dead, learn to dash when the first infected comes for you, find
 an arcade cabinet you can actually play, and watch a police officer make his last
 stand. He throws you his pistol. Search his body for his flashlight, hold out
 until a train comes, and ride it into Akihabara: one big level of platforms and a
-maze of shuttered shops, full of wandering dead and bodies with coins on them.
+subway concourse of halls and passages below, full of wandering dead and bodies
+with coins on them.
 
 ## The route
 

@@ -3,6 +3,30 @@
 Every version is one build sprint. Newest first. Versions are tagged in git, and
 each tag publishes a GitHub Release with downloads.
 
+## [0.7.0] - 2026-10-05 - Underground
+
+### Changed
+- **Campaign Akihabara's lower level is now a subway concourse, not a maze.** Two
+  rows of big halls (shuttered shops, poster walls, neon storefronts, square
+  columns in the wide ones) open off a long central passage through wide
+  doorways, with doorways between neighboring halls. Some halls open straight
+  onto the passage.
+- **No more escalator in the opening.** At Kanda the crowd heads east along the
+  platform toward the exits, with a marker to follow. Partway there the quake
+  hits: lights fail, people scream, some run and some go down, and you're knocked
+  off your feet. You wake up where you fell, among the people you were following.
+- **The officer's last stand moved to the top-right corner of the station** (the
+  far platform's east end), and the zombies come out of the dark at the east end.
+  It's slower now: they shamble in at about a third of the old speed, he fires
+  about once a second, more of them arrive halfway through, and he can't be
+  overrun before ten seconds have passed.
+
+### Fixed
+- **The open side of the train car looked bolted to a static ledge.** While the
+  train moves, the space beyond the car's open side is now dark tunnel with
+  motion-blurred streaks (wall seams, cables, the odd lamp) sliding past. It
+  fades away as the train stops.
+
 ## [0.6.0] - 2026-10-05 - Campaign and Arcade
 
 ### Added
