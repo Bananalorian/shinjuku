@@ -79,6 +79,97 @@ pub fn car_def() -> StationDef {
     }
 }
 
+/// One stop on the Yamanote loop. Size: 0 small, 1 medium, 2 large (halls below), 3 huge.
+pub struct LoopStop {
+    pub name: &'static str,
+    pub code: &'static str,
+    pub size: u8,
+    pub boss: bool,
+}
+
+/// The whole loop, from Akihabara all the way around (through Ueno, Ikebukuro,
+/// Shinjuku, Shibuya, Shinagawa, Tokyo and Kanda) and back to Akihabara.
+pub const LOOP: [LoopStop; 31] = [
+    LoopStop { name: "AKIHABARA", code: "JY03", size: 2, boss: false },
+    LoopStop { name: "OKACHIMACHI", code: "JY04", size: 0, boss: false },
+    LoopStop { name: "UENO", code: "JY05", size: 3, boss: true },
+    LoopStop { name: "UGUISUDANI", code: "JY06", size: 0, boss: false },
+    LoopStop { name: "NIPPORI", code: "JY07", size: 1, boss: false },
+    LoopStop { name: "NISHI-NIPPORI", code: "JY08", size: 0, boss: false },
+    LoopStop { name: "TABATA", code: "JY09", size: 1, boss: false },
+    LoopStop { name: "KOMAGOME", code: "JY10", size: 0, boss: false },
+    LoopStop { name: "SUGAMO", code: "JY11", size: 1, boss: false },
+    LoopStop { name: "OTSUKA", code: "JY12", size: 0, boss: false },
+    LoopStop { name: "IKEBUKURO", code: "JY13", size: 3, boss: true },
+    LoopStop { name: "MEJIRO", code: "JY14", size: 0, boss: false },
+    LoopStop { name: "TAKADANOBABA", code: "JY15", size: 1, boss: false },
+    LoopStop { name: "SHIN-OKUBO", code: "JY16", size: 0, boss: false },
+    LoopStop { name: "SHINJUKU", code: "JY17", size: 3, boss: true },
+    LoopStop { name: "YOYOGI", code: "JY18", size: 1, boss: false },
+    LoopStop { name: "HARAJUKU", code: "JY19", size: 1, boss: false },
+    LoopStop { name: "SHIBUYA", code: "JY20", size: 3, boss: true },
+    LoopStop { name: "EBISU", code: "JY21", size: 1, boss: false },
+    LoopStop { name: "MEGURO", code: "JY22", size: 1, boss: false },
+    LoopStop { name: "GOTANDA", code: "JY23", size: 1, boss: false },
+    LoopStop { name: "OSAKI", code: "JY24", size: 0, boss: false },
+    LoopStop { name: "SHINAGAWA", code: "JY25", size: 3, boss: true },
+    LoopStop { name: "TAKANAWA GATEWAY", code: "JY26", size: 1, boss: false },
+    LoopStop { name: "TAMACHI", code: "JY27", size: 1, boss: false },
+    LoopStop { name: "HAMAMATSUCHO", code: "JY28", size: 1, boss: false },
+    LoopStop { name: "SHIMBASHI", code: "JY29", size: 2, boss: false },
+    LoopStop { name: "YURAKUCHO", code: "JY30", size: 1, boss: false },
+    LoopStop { name: "TOKYO", code: "JY01", size: 3, boss: true },
+    LoopStop { name: "KANDA", code: "JY02", size: 1, boss: false },
+    LoopStop { name: "AKIHABARA", code: "JY03", size: 2, boss: true },
+];
+
+/// Build stop `i` of the loop: its size sets the layout, its position sets the difficulty.
+pub fn loop_def(i: usize) -> StationDef {
+    use Band::*;
+    let stop = &LOOP[i];
+    let f = i as f32;
+    let (width, bands, mult) = match stop.size {
+        0 => (28, vec![(Platform, 5), (Track, 3), (Platform, 6), (Track, 3), (Platform, 5)], 0.7),
+        1 => (36, vec![(Platform, 6), (Track, 3), (Platform, 7), (Track, 3), (Platform, 6), (Concourse, 6)], 1.0),
+        2 => (46, vec![(Platform, 6), (Track, 3), (Platform, 7), (Track, 3), (Platform, 5), (Concourse, 30)], 1.4),
+        _ => (50, vec![(Platform, 6), (Track, 3), (Platform, 6), (Track, 3), (Platform, 6), (Track, 3), (Platform, 5), (Concourse, 28)], 1.8),
+    };
+    // a handful of looks so neighbouring stations feel different
+    let looks: [(Color, Color, Color, Color, Vec<Color>); 6] = [
+        (Color::new(0.14, 0.10, 0.19, 1.0), rgb(214, 200, 210), rgb(138, 134, 140), Color::new(0.85, 0.8, 1.0, 1.0), vec![rgb(255, 60, 200), rgb(40, 230, 255)]),
+        (Color::new(0.09, 0.14, 0.15, 1.0), rgb(196, 210, 204), rgb(132, 138, 134), Color::new(0.8, 1.0, 0.95, 1.0), vec![rgb(60, 220, 160), rgb(250, 250, 240)]),
+        (Color::new(0.17, 0.12, 0.07, 1.0), rgb(222, 206, 180), rgb(146, 138, 124), Color::new(1.0, 0.86, 0.62, 1.0), vec![rgb(255, 140, 40), rgb(255, 210, 90)]),
+        (Color::new(0.06, 0.07, 0.12, 1.0), rgb(180, 190, 206), rgb(118, 122, 132), Color::new(0.75, 0.85, 1.0, 1.0), vec![rgb(80, 120, 255)]),
+        (Color::new(0.12, 0.12, 0.12, 1.0), rgb(210, 210, 204), rgb(134, 132, 128), Color::new(1.0, 0.97, 0.9, 1.0), vec![rgb(255, 230, 60), rgb(255, 255, 255)]),
+        (Color::new(0.13, 0.08, 0.13, 1.0), rgb(206, 196, 214), rgb(130, 126, 136), Color::new(0.95, 0.85, 1.0, 1.0), vec![rgb(200, 120, 255), rgb(120, 200, 255)]),
+    ];
+    let (mut ambient, wall, floor, lamp, neon) = looks[(i * 7 + 3) % 6].clone();
+    if stop.boss {
+        ambient = Color::new(0.16, 0.05, 0.05, 1.0); // emergency red where something big is waiting
+    }
+    StationDef {
+        name: stop.name,
+        code: stop.code,
+        width,
+        bands,
+        quota: ((14.0 + f * 2.2) * mult) as u32, // hidden: the train only comes once enough are dead
+        max_alive: (34.0 + f * 2.2).min(100.0) as usize,
+        spawn_rate: (0.3 + f * 0.03, 0.3 + f * 0.03),
+        mix: [1.0, (0.08 + f * 0.03).min(0.8), if i >= 5 { (0.02 + f * 0.008).min(0.25) } else { 0.0 }],
+        ambient,
+        wall,
+        floor,
+        lamp,
+        neon,
+        flicker: (0.1 + f * 0.012).min(0.5),
+        boss: stop.boss,
+        tagline: "",
+        car: false,
+        intro_props: false,
+        maze: stop.size >= 2,
+    }
+}
+
 /// Campaign: Kanda, where the opening happens.
 pub fn kanda_def() -> StationDef {
     StationDef {
@@ -104,30 +195,6 @@ pub fn kanda_def() -> StationDef {
     }
 }
 
-/// Campaign: Akihabara opened up. Platforms up top, a maze of shops and passages below.
-pub fn akiba_campaign_def() -> StationDef {
-    StationDef {
-        name: "AKIHABARA",
-        code: "JY03",
-        width: 46,
-        bands: vec![(Band::Platform, 6), (Band::Track, 3), (Band::Platform, 7), (Band::Track, 3), (Band::Platform, 5), (Band::Concourse, 30)],
-        quota: 99999,
-        max_alive: 70,
-        spawn_rate: (0.35, 0.35),
-        mix: [1.0, 0.3, 0.06],
-        ambient: Color::new(0.13, 0.09, 0.18, 1.0),
-        wall: rgb(214, 200, 210),
-        floor: rgb(136, 132, 138),
-        lamp: Color::new(0.85, 0.8, 1.0, 1.0),
-        neon: vec![rgb(255, 60, 200), rgb(40, 230, 255), rgb(255, 230, 60)],
-        flicker: 0.3,
-        boss: false,
-        tagline: "",
-        car: false,
-        intro_props: false,
-        maze: true,
-    }
-}
 
 /// The route: clockwise up the Yamanote line from Akihabara to Shinjuku.
 pub fn stations() -> Vec<StationDef> {

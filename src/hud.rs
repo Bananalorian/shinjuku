@@ -80,17 +80,30 @@ pub fn draw_hud(w: &World, art: &Art, u: f32, defs: &[StationDef], input: &Input
     text(art, w.name, nx, m, 2.0 * u, CREAM);
     let prog = (w.kills as f32 / w.quota as f32).min(1.0);
     let bw = 92.0 * u;
-    if !w.campaign {
+    if !w.story {
         bar(nx, m + 17.0 * u, bw, 3.0 * u, prog, GREEN, u);
     }
     let label = match w.phase {
-        _ if w.campaign => "EXPLORE. SEARCH THE DEAD.".to_string(),
+        Phase::Train if w.story => "THE TRAIN IS HERE. GET ON.".to_string(),
+        Phase::Boss if w.story => "SOMETHING BIG IS HERE.".to_string(),
+        _ if w.story => "CLEAR THE STATION. SEARCH THE DEAD.".to_string(),
         Phase::Train => "BOARD THE TRAIN".to_string(),
         Phase::Boss => "KILL THE RUSH HOUR".to_string(),
         _ => format!("CLEARED {}/{}", w.kills.min(w.quota), w.quota),
     };
     text(art, &label, nx, m + 23.0 * u, u, DIM);
 
+    // where you are on the loop
+    if let Some((i, n)) = w.loop_pos {
+        let s1 = format!("STOP {} OF {}", i + 1, n);
+        text(art, &s1, sw - m - text_w(&s1, u), m, u, CREAM);
+        let k = (i as f32 + 0.5) / n as f32;
+        bar(sw - m - 80.0 * u, m + 10.0 * u, 80.0 * u, 2.0 * u, k, GREEN, u);
+        if !w.next_name.is_empty() {
+            let s2 = format!("NEXT {}", w.next_name);
+            text(art, &s2, sw - m - text_w(&s2, u), m + 16.0 * u, u, DIM);
+        }
+    }
     // the route along the Yamanote line (arcade only)
     if !w.story {
     let n = defs.len();
@@ -190,12 +203,12 @@ pub fn draw_title(art: &Art, u: f32, t: f32, defs: &[StationDef], mode: Mode, se
     let y = sh * 0.13;
     text_c(art, "LAST TRAIN", sw * 0.5, y, big, CREAM);
     text_c(art, "TO SHINJUKU", sw * 0.5, y + 9.0 * big, big, RED);
-    let sub = "CLEAR THE YAMANOTE LINE. ONE STATION AT A TIME.";
+    let sub = "30 STATIONS. ONE LOOP. ONE TRAIN.";
     text_c(art, sub, sw * 0.5, y + 18.0 * big + 4.0 * u, fit(sub, u, sw * 0.92), DIM);
 
     // route list
-    let route: Vec<String> = defs.iter().map(|d| d.name.to_string()).collect();
-    let line = route.join(" > ");
+    let _ = defs;
+    let line = "KANDA > AKIHABARA > UENO > IKEBUKURO > SHINJUKU > SHIBUYA > SHINAGAWA > TOKYO > ...".to_string();
     let lp = fit(&line, u, sw * 0.92);
     text_c(art, &line, sw * 0.5, sh * 0.55, lp, GREEN);
 
@@ -215,7 +228,7 @@ pub fn draw_title(art: &Art, u: f32, t: f32, defs: &[StationDef], mode: Mode, se
         text_c(art, opts, sw * 0.5, sh * 0.62 + 11.0 * u, fit(opts, u, sw * 0.92), DIM);
     }
     // the menu
-    let items = [("CAMPAIGN", "THE STORY: FROM KANDA INTO AKIHABARA"), ("ARCADE", "THE ORIGINAL RUN: 5 STATIONS, UPGRADE CARDS")];
+    let items = [("NEW GAME", "FROM KANDA, ALL THE WAY AROUND THE YAMANOTE LOOP")];
     let mut rects = Vec::new();
     for (i, (name, desc)) in items.iter().enumerate() {
         let y = sh * 0.73 + i as f32 * 18.0 * u;
@@ -240,21 +253,6 @@ pub fn draw_title(art: &Art, u: f32, t: f32, defs: &[StationDef], mode: Mode, se
     rects
 }
 
-/// Between stations in the campaign: just the ride, no cards.
-pub fn draw_ride(art: &Art, u: f32, t: f32, name: &str, code: &str) {
-    let (sw, sh) = (screen_width(), screen_height());
-    clear_background(Color::new(0.03, 0.03, 0.05, 1.0));
-    for i in 0..9 {
-        let speed = 900.0 * u / 3.0;
-        let x = sw - ((t * speed + i as f32 * sw / 4.5) % (sw * 2.0));
-        let y = sh * (0.3 + (i % 3) as f32 * 0.035);
-        draw_rectangle(x, y, 40.0 * u, u * 1.5, Color::new(1.0, 0.85, 0.55, 0.6));
-        draw_rectangle(x - 60.0 * u, y, 60.0 * u, u * 1.5, Color::new(1.0, 0.85, 0.55, 0.12));
-    }
-    let title = format!("NEXT STOP: {}", name);
-    text_c(art, &title, sw * 0.5, sh * 0.48, fit(&title, 3.0 * u, sw * 0.9), CREAM);
-    text_c(art, code, sw * 0.5, sh * 0.48 + 26.0 * u, u, GREEN);
-}
 
 /// The ride between stations: tunnel lights streaking past and three upgrade cards.
 /// Returns the screen rects of the cards so taps can be matched.

@@ -3,6 +3,39 @@
 Every version is one build sprint. Newest first. Versions are tagged in git, and
 each tag publishes a GitHub Release with downloads.
 
+## [0.8.0] - 2026-10-05 - The loop
+
+### Changed
+- **One game, one path.** Campaign and Arcade are gone from the menu: NEW GAME
+  plays the opening at Kanda, then rolls straight into the main game. The upgrade
+  cards are gone; vending machines will sell upgrades next.
+- **The whole Yamanote loop.** 30 stations around, from Akihabara through Ueno,
+  Ikebukuro, Shinjuku, Shibuya, Shinagawa, Tokyo and Kanda, and back to Akihabara
+  (31 stops), with real names and JY station codes.
+- **Stations come in four sizes**, built around the big Akihabara you liked:
+  small (just platforms), medium (platforms and a concourse), large (Akihabara's
+  size, with underground halls and passages), and huge (three tracks plus halls)
+  for Ueno, Ikebukuro, Shinjuku, Shibuya, Shinagawa and Tokyo.
+- **A hidden quota.** Each station has a number of kills it needs before it falls
+  quiet and the train comes; you're not told how many. When it comes, a marker
+  points you to the nearest open door.
+- **It gets harder all the way round:** more wanderers, more hunters mixed in,
+  runners early and brutes from the sixth stop, a little more health on each
+  zombie, more flickering lights. Every station has bodies with coins on them.
+- **Bosses at the big stations:** Ueno, Ikebukuro, Shinjuku, Shibuya, Shinagawa
+  and Tokyo, and a final one back at Akihabara. Killing a mid-loop boss clears
+  the station and calls the train; killing the last one ends the game.
+
+### Added
+- **Miyake.** On the train out of Kanda, the speaker crackles: "Hello? ...Hello?"
+  It's Miyake, the last person left in the Yamanote line operations center, who
+  has been watching you on the cameras and asks you to clear every station on
+  the loop. She checks in on the radio at key points around the loop.
+- **Rides between stations:** an empty car rattling through the tunnels (empty
+  apart from those who never got off), the auto voice announcing the next stop
+  and which side the doors open on. Tap, Enter or A skips ahead.
+- The HUD shows which stop you're on (STOP 5 OF 31) and the next station.
+
 ## [0.7.3] - 2026-10-05 - Why won't they go down
 
 ### Changed

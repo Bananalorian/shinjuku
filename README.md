@@ -2,14 +2,10 @@
 
 ![Fighting The Rush Hour at Shinjuku](docs/screenshots/shinjuku-boss.png)
 
-An isometric twin-stick zombie shooter set in Tokyo's train stations, with two
-ways to play:
-
-- **Campaign:** a story that starts on a crowded Yamanote line train, goes wrong
-  at Kanda, and opens up into a big, explorable Akihabara where you scavenge the
-  dead for coins.
-- **Arcade:** the original run. Clear five stations from Akihabara to Shinjuku,
-  pick an upgrade card on every train ride, and kill the boss at the end of the line.
+An isometric twin-stick zombie shooter set in Tokyo's train stations. It starts
+on a crowded Yamanote line train that pulls into Kanda just as everything goes
+wrong. Then the last person in the line's operations center asks you to clear
+every station on the loop, one by one, all the way around and back to Akihabara.
 
 **[▶ Play in your browser](https://bananalorian.github.io/shinjuku/)** ·
 **[Download for Windows, macOS, Linux](https://github.com/Bananalorian/shinjuku/releases/latest)** ·
@@ -31,26 +27,27 @@ crows picking at whatever the horde left behind.
 | ![Akihabara](docs/screenshots/akihabara.png) | ![The train arriving at Ueno](docs/screenshots/train.png) |
 | ![Ikebukuro](docs/screenshots/ikebukuro.png) | ![Shinjuku](docs/screenshots/shinjuku-boss.png) |
 
-## The campaign
+## The story
 
 It starts on a crowded Yamanote line car pulling into Kanda. You get off and
 follow the crowd down the platform until a quake hits and the lights go out. You
-wake up among the dead, learn to dash when the first infected comes for you, find
-an arcade cabinet you can actually play, and watch a police officer make his last
-stand. He throws you his pistol. Search his body for his flashlight, hold out
-until a train comes, and ride it into Akihabara: one big level of platforms and a
-subway concourse of halls and passages below, full of wandering dead and bodies
-with coins on them.
+wake up among the dead, meet the first infected (and learn to dash), find an
+arcade cabinet you can actually play, and watch a police officer make his last
+stand. He throws you his pistol. Search his body for his flashlight and hold out
+until a train comes.
 
-## The route
+On the train, the speaker crackles. It's Miyake, alone in the operations center,
+watching you on the cameras. She can still run one train, and she needs someone
+to clear the stations.
 
-| Station | Line code | What's waiting |
-|---|---|---|
-| Akihabara | JY03 | Neon, walkers, a gentle start |
-| Ueno | JY05 | Runners join in; ticket gates on the concourse |
-| Ikebukuro | JY13 | Three tracks, amber light, the first brutes |
-| Takadanobaba | JY15 | The lights are dying. Stay in the light. |
-| Shinjuku | JY17 | The busiest station on Earth, red emergency strobes, and The Rush Hour |
+## The loop
+
+30 stations, from Akihabara all the way around the Yamanote line and back.
+Stations come in four sizes, from small platform-only stops up to huge three-track
+stations with underground halls. Each one has a hidden kill quota: clear enough of
+the dead and the station falls quiet, and the train comes back for you. It gets
+harder all the way round. Search bodies for coins. Bosses wait at the big stations:
+Ueno, Ikebukuro, Shinjuku, Shibuya, Shinagawa, Tokyo, and Akihabara at the end.
 
 ## Controls
 
@@ -123,6 +120,7 @@ To inspect the raw sounds natively, run with `SJ_WAV=1` and they're written to `
 | `src/main.rs` | Scene flow (title, opening, play, upgrade ride, game over, victory) and debug hooks |
 | `src/intro.rs` | The scripted, playable opening: train, quake, dash lesson, arcade, the officer's cutscene, the search |
 | `src/arcade.rs` | STAR COMMUTER, the playable arcade cabinet |
+| `src/ride.rs` | Rides between stations: the auto voice and Miyake on the radio |
 | `src/world.rs` | All gameplay: player, zombies, bullets, grenades, particles, train, boss, upgrades |
 | `src/level.rs` | Station definitions, baked floor/wall image, props, lights, collision, flow field |
 | `src/render.rs` | Render pipeline and GLSL shaders (lighting composite, tilt-shift, bloom, grade) |
@@ -172,7 +170,8 @@ SJ_SHOTS=60,300 SJ_STATION=1 SJ_SCENE=train SJ_AUTO=1 cargo run --release
 Renders scripted frames to `/tmp/sj_<frame>.png` and quits. `SJ_SCENE` can be
 `train`, `boss`, `bossnear`, `win`, `dead`, `upgrade`, `wall`, `crows`,
 `intro` (the opening from the top), `intro_after` (the opening from the quake on),
-`akiba` (the campaign's Akihabara; add `SJ_POS=x,y` to drop in somewhere),
+`akiba` (a loop station; `SJ_LOOP=n` picks which, `SJ_POS=x,y` drops you somewhere),
+`ride` (Miyake's call on the train),
 or `pos:X,Y` to drop the player at a spot. With `SJ_AUTO=1` the opening plays itself. `SJ_SIZE=844x390` simulates a phone
 screen, `SJ_NOTILT=1` starts with tilt-shift off, `SJ_AUTO=1` turns on an autopilot
 that wanders and shoots, and `SJ_STATS=1` prints horde stats when it quits (handy

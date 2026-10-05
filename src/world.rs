@@ -391,6 +391,11 @@ pub struct World {
     pub car_doors_open: bool,
     /// Scripted moments slow your walk (1.0 = normal); dashing is off while it's below 1.
     pub walk_scale: f32,
+    /// Where we are on the loop (index, total) and the next stop, for the HUD.
+    pub loop_pos: Option<(usize, usize)>,
+    pub next_name: String,
+    /// The last boss: killing it ends the game instead of calling the train.
+    pub final_boss: bool,
     pub campaign: bool,
     /// Any campaign world (shows coins, allows searching bodies).
     pub story: bool,
@@ -523,6 +528,9 @@ impl World {
             car_speed: 0.0,
             car_doors_open: false,
             walk_scale: 1.0,
+            loop_pos: None,
+            next_name: String::new(),
+            final_boss: false,
             campaign: false,
             story: false,
             has_light: true,
@@ -805,8 +813,9 @@ impl World {
                     let p = pts[rand::gen_range(0, pts.len())];
                     let kind = self.pick_kind();
                     self.add_zombie(kind, p);
+                    let hunter = chance((self.station as f32 * 0.02).min(0.5));
                     if let Some(z) = self.zombies.last_mut() {
-                        z.idle = true;
+                        z.idle = !hunter;
                     }
                 }
             }
@@ -872,10 +881,10 @@ impl World {
     pub fn add_zombie(&mut self, kind: ZKind, pos: Vec2) {
         let s = self.station as f32;
         let (hp, r, speed, variants) = match kind {
-            ZKind::Walker => (3.0 + s * 0.5, 0.27, rnd(1.2, 1.75) * (1.0 + s * 0.05), 4),
-            ZKind::Runner => (2.0 + s * 0.3, 0.26, rnd(2.9, 3.4), 3),
-            ZKind::Brute => (22.0 + s * 4.0, 0.42, rnd(0.95, 1.15), 1),
-            ZKind::Boss => (900.0, 1.0, 1.9, 1),
+            ZKind::Walker => (3.0 + s * 0.22, 0.27, rnd(1.2, 1.75) * (1.0 + (s * 0.015).min(0.5)), 4),
+            ZKind::Runner => (2.0 + s * 0.15, 0.26, rnd(2.9, 3.4), 3),
+            ZKind::Brute => (22.0 + s * 1.5, 0.42, rnd(0.95, 1.15), 1),
+            ZKind::Boss => (if self.story { 200.0 + s * 20.0 } else { 900.0 }, 1.0, 1.9, 1),
         };
         let id = self.next_id;
         self.next_id += 1;
@@ -1128,14 +1137,32 @@ impl World {
         if kind == ZKind::Brute {
             self.shake = (self.shake + 0.2).min(1.0);
         }
-        if kind == ZKind::Boss {
+        if kind == ZKind::Boss && self.story && !self.final_boss {
+            // mid-loop bosses: the station is yours, and the train comes
+            self.phase = Phase::Train;
+            self.phase_t = 0.0;
+            self.slowmo = 0.3;
+            self.flash = 0.5;
+            self.shake = 1.0;
+            self.shock = Some((pos, 0.0));
+            self.say("IT'S DOWN", "THE TRAIN IS COMING. GET TO THE DOORS.", 5.0);
+            for z in &mut self.zombies {
+                z.hp = 0.0;
+            }
+            let ids: Vec<usize> = (0..self.zombies.len()).filter(|&k| !self.zombies[k].dead).collect();
+            for k in ids {
+                let d = (self.zombies[k].pos - pos).normalize_or_zero();
+                self.kill_zombie(k, d);
+            }
+        } else if kind == ZKind::Boss {
             self.phase = Phase::Won;
             self.phase_t = 0.0;
             self.slowmo = 0.25;
             self.flash = 0.6;
             self.shake = 1.0;
             self.shock = Some((pos, 0.0));
-            self.say("SHINJUKU CLEARED", "THE LAST TRAIN IS YOURS", 99.0);
+            let (t1, t2) = if self.story { ("THE LOOP IS CLEAR", "EVERY STATION. ALL THE WAY AROUND.") } else { ("SHINJUKU CLEARED", "THE LAST TRAIN IS YOURS") };
+            self.say(t1, t2, 99.0);
             for z in &mut self.zombies {
                 if z.kind != ZKind::Boss {
                     z.hp = 0.0;
@@ -1579,7 +1606,11 @@ impl World {
                         self.phase = Phase::Train;
                         self.phase_t = 0.0;
                         self.sfx.push(Sfx::Clear);
-                        self.say("STATION CLEAR", "TRAIN ARRIVING - GET TO THE DOORS", 4.0);
+                        if self.story {
+                            self.say("THE STATION FALLS QUIET", "A TRAIN IS COMING. GET TO THE PLATFORMS.", 4.5);
+                        } else {
+                            self.say("STATION CLEAR", "TRAIN ARRIVING - GET TO THE DOORS", 4.0);
+                        }
                     }
                 }
             }

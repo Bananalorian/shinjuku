@@ -95,6 +95,31 @@ pub struct Intro {
     light_hint_t: f32,
 }
 
+/// The speech box used by the opening and the train rides. `lift` raises it above letterbox bars.
+pub fn draw_dialog(art: &Art, u: f32, d: &Dialog, lift: f32) {
+    let (sw, sh) = (screen_width(), screen_height());
+    let bw = (sw * 0.86).min(300.0 * u);
+    let bh = 30.0 * u;
+    let bx = (sw - bw) * 0.5;
+    let by = sh - bh - 22.0 * u - lift;
+    let a = (d.t * 5.0).min(1.0) * ((d.dur - d.t) * 3.0).clamp(0.0, 1.0);
+    let system = d.who == "ANNOUNCEMENT";
+    draw_rectangle(bx, by, bw, bh, Color::new(0.03, 0.03, 0.05, 0.85 * a));
+    draw_rectangle(bx, by, bw, u, with_alpha(if system { GREEN } else { CREAM }, a));
+    hud::text(art, d.who, bx + 6.0 * u, by + 5.0 * u, u, with_alpha(if system { GREEN } else { RED }, a));
+    let shown = ((d.t * 40.0) as usize).min(d.text.len());
+    if hud::text_w(&d.text, u) > bw - 12.0 * u {
+        let cut = d.text[..d.text.len() / 2 + 1].rfind(' ').unwrap_or(d.text.len() / 2);
+        let (l1, l2) = d.text.split_at(cut);
+        let s1 = &l1[..shown.min(l1.len())];
+        let s2 = if shown > l1.len() { &l2[..(shown - l1.len()).min(l2.len())] } else { "" };
+        hud::text(art, s1, bx + 6.0 * u, by + 14.0 * u, u, with_alpha(CREAM, a));
+        hud::text(art, s2.trim_start(), bx + 6.0 * u, by + 22.0 * u, u, with_alpha(CREAM, a));
+    } else {
+        hud::text(art, &d.text[..shown], bx + 6.0 * u, by + 15.0 * u, u, with_alpha(CREAM, a));
+    }
+}
+
 pub fn make_car_world(art: &Art) -> World {
     let def = car_def();
     let mut w = World::from_def(&def, "FOR AKIHABARA", 0, art, Stats::default(), 0, false);
@@ -951,34 +976,7 @@ impl Intro {
 
         // dialogue box
         if let Some(d) = &self.dialog {
-            let bw = (sw * 0.86).min(300.0 * u);
-            let bh = 30.0 * u;
-            let bx = (sw - bw) * 0.5;
-            let by = sh - bh - 22.0 * u - sh * 0.11 * self.letterbox;
-            let a = (d.t * 5.0).min(1.0) * ((d.dur - d.t) * 3.0).clamp(0.0, 1.0);
-            draw_rectangle(bx, by, bw, bh, Color::new(0.03, 0.03, 0.05, 0.85 * a));
-            draw_rectangle(bx, by, bw, u, with_alpha(if d.who == "ANNOUNCEMENT" { GREEN } else { CREAM }, a));
-            hud::text(art, d.who, bx + 6.0 * u, by + 5.0 * u, u, with_alpha(if d.who == "ANNOUNCEMENT" { GREEN } else { RED }, a));
-            let shown = ((d.t * 40.0) as usize).min(d.text.len());
-            let line = &d.text[..shown];
-            let px = {
-                let mut p = u;
-                while p > 1.0 && hud::text_w(&d.text, p) > bw - 12.0 * u {
-                    p -= 1.0;
-                }
-                p
-            };
-            // wrap long lines in two
-            if hud::text_w(&d.text, u) > bw - 12.0 * u {
-                let cut = d.text[..d.text.len() / 2 + 1].rfind(' ').unwrap_or(d.text.len() / 2);
-                let (l1, l2) = d.text.split_at(cut);
-                let s1 = &l1[..shown.min(l1.len())];
-                let s2 = if shown > l1.len() { &l2[..(shown - l1.len()).min(l2.len())] } else { "" };
-                hud::text(art, s1, bx + 6.0 * u, by + 14.0 * u, u, with_alpha(CREAM, a));
-                hud::text(art, s2.trim_start(), bx + 6.0 * u, by + 22.0 * u, u, with_alpha(CREAM, a));
-            } else {
-                hud::text(art, line, bx + 6.0 * u, by + 15.0 * u, px, with_alpha(CREAM, a));
-            }
+            draw_dialog(art, u, d, sh * 0.11 * self.letterbox);
         }
 
         // tutorial prompt
