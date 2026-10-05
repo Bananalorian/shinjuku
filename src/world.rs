@@ -21,19 +21,21 @@ pub struct Stats {
     pub max_hp: f32,
     pub speed: f32,
     pub dash_cd: f32,
+    /// How fast rounds travel (the pistol's are slow enough to see).
+    pub bullet_speed: f32,
 }
 
 impl Default for Stats {
     fn default() -> Self {
-        // the officer's pistol: steady, accurate, never runs dry
-        Stats { multishot: 1, dmg: 1.7, rate: 5.0, pierce: 0, gren_cd: 6.0, gren_radius: 2.6, max_hp: 100.0, speed: 4.6, dash_cd: 1.3 }
+        // the officer's pistol: steady, never runs dry, but slow rounds and it takes a few to drop one
+        Stats { multishot: 1, dmg: 1.0, rate: 3.5, pierce: 0, gren_cd: 6.0, gren_radius: 2.6, max_hp: 100.0, speed: 4.6, dash_cd: 1.3, bullet_speed: 15.0 }
     }
 }
 
 impl Stats {
     /// Arcade mode keeps the original auto rifle.
     pub fn arcade() -> Self {
-        Stats { multishot: 1, dmg: 1.0, rate: 10.0, pierce: 1, ..Stats::default() }
+        Stats { multishot: 1, dmg: 1.0, rate: 10.0, pierce: 1, bullet_speed: 26.0, ..Stats::default() }
     }
 }
 
@@ -750,7 +752,7 @@ impl World {
             for k in 0..n {
                 let a = base + (k as f32 - (n - 1) as f32 * 0.5) * 0.11 + rnd(-0.035, 0.035);
                 let d = vec2(a.cos(), a.sin());
-                self.bullets.push(Bullet { pos: muzzle, vel: d * 26.0, life: 0.85, dmg: st.dmg, pierce: st.pierce, hits: [0; 8], nh: 0 });
+                self.bullets.push(Bullet { pos: muzzle, vel: d * st.bullet_speed, life: 22.0 / st.bullet_speed, dmg: st.dmg, pierce: st.pierce, hits: [0; 8], nh: 0 });
             }
             self.lights.push(TempLight { pos: muzzle, radius: 2.8, color: Color::new(1.0, 0.8, 0.45, 1.0), life: 0.06, max: 0.06 });
             emit(&mut self.particles, particle(PK::Flash, muzzle, 10.0, Vec3::ZERO, 0.05, 6.0, Color::new(1.0, 0.85, 0.5, 1.0)));
@@ -1396,7 +1398,7 @@ impl World {
     /// Fire a bullet from anyone (the officer in the opening).
     pub fn fire_bullet(&mut self, from: Vec2, dir: Vec2, dmg: f32) {
         let d = dir.normalize_or_zero();
-        self.bullets.push(Bullet { pos: from + d * 0.5, vel: d * 26.0, life: 0.85, dmg, pierce: 0, hits: [0; 8], nh: 0 });
+        self.bullets.push(Bullet { pos: from + d * 0.5, vel: d * 15.0, life: 1.5, dmg, pierce: 0, hits: [0; 8], nh: 0 });
         self.muzzle(from + d * 0.5);
         self.sfx.push(Sfx::Shot);
     }

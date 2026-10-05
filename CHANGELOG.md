@@ -3,6 +3,19 @@
 Every version is one build sprint. Newest first. Versions are tagged in git, and
 each tag publishes a GitHub Release with downloads.
 
+## [0.7.3] - 2026-10-05 - Why won't they go down
+
+### Changed
+- **The officer's last stand:** he fires like a real pistol (steady pops, a pause
+  every few shots), and the rounds clearly hit, but the zombies just soak them
+  up and keep coming. "WHY WON'T YOU GO DOWN?!" "THERE'S TOO MANY..." Then, as
+  they close in: "HEY KID, TAKE THIS! IT'S TOO DANGEROUS TO-" and he's dragged
+  down mid-sentence. His throw falls short, landing between you and them.
+- **The pistol now feels like a pistol:** slower rounds you can see travel, a
+  slower trigger (3.5 shots a second), and less damage, so it takes three or four
+  hits to drop one. The zombies that got him only become killable once you have
+  his gun. Arcade mode keeps the original fast-firing rifle.
+
 ## [0.7.2] - 2026-10-05 - The figure in the corner
 
 ### Changed

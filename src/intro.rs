@@ -80,6 +80,7 @@ pub struct Intro {
     pub vomiter: Option<Vec2>,
     flee_phase: u8,
     flee_t: f32,
+    said_kid: bool,
     turned: Option<u32>,
     flee_target: Vec2,
     officer: Option<usize>,
@@ -156,6 +157,7 @@ impl Intro {
             vomiter: None,
             flee_phase: 0,
             flee_t: 0.0,
+            said_kid: false,
             turned: None,
             flee_target: Vec2::ZERO,
             officer: None,
@@ -708,6 +710,8 @@ impl Intro {
                 for z in w.zombies.iter_mut().filter(|z| self.ambush.contains(&z.id)) {
                     z.attack_cd = 9.0;
                     z.speed = 0.0;
+                    z.hp = 9999.0; // his rounds hit, and they just keep coming
+                    z.knock = Vec2::ZERO;
                     let d = opos - z.pos;
                     if d.length() > 0.6 {
                         z.pos += d.normalize() * 0.5 * dt;
@@ -721,6 +725,9 @@ impl Intro {
                 if self.t > 0.6 && self.t - dt <= 0.6 {
                     self.say("OFFICER", "STAY BACK! I SAID STAY BACK!");
                 }
+                if self.t > 4.5 && self.t - dt <= 4.5 {
+                    self.say("OFFICER", "WHY WON'T YOU GO DOWN?!");
+                }
                 if self.t > 5.5 && self.t - dt <= 5.5 {
                     // more of them shamble out of the dark
                     let away = vec2(1.0, -0.15).normalize();
@@ -732,26 +739,30 @@ impl Intro {
                             self.ambush.push(z.id);
                         }
                     }
-                    self.say("OFFICER", "THERE'S TOO MANY OF THEM...");
+                    self.say("OFFICER", "THERE'S TOO MANY...");
                 }
                 self.shot_t -= dt;
                 if let Some((zp, dist)) = nearest {
                     if let Some(n) = w.npcs.get_mut(oi) {
                         n.aim = zp - opos;
                     }
-                    if self.shot_t <= 0.0 && self.shots < 9 && self.t > 1.2 {
-                        self.shot_t = 1.1;
+                    if self.shot_t <= 0.0 && self.t > 1.2 {
                         self.shots += 1;
-                        w.fire_bullet(opos, zp - opos, 1.2);
+                        self.shot_t = if self.shots % 4 == 0 { 1.2 } else { 0.32 };
+                        w.fire_bullet(opos, zp - opos + rand_dir() * 0.2, 1.0);
+                    }
+                    if dist < 1.2 && self.t > 7.5 && !self.said_kid {
+                        self.said_kid = true;
+                        self.say("OFFICER", "HEY KID, TAKE THIS! IT'S TOO DANGEROUS TO-");
                     }
                     if dist < 0.75 && self.t > 10.0 {
-                        self.say("OFFICER", "KID! IT'S TOO DANGEROUS HERE... TAKE THIS!");
+                        // he tries to throw it as they drag him down; it falls short
                         let to = w.player.pos - opos;
-                        let land = opos + to * 0.8;
+                        let land = opos + to * 0.45;
                         let mut pk = Pickup::new(opos, PickupKind::Pistol);
                         pk.z = 10.0;
-                        pk.vz = 150.0;
-                        pk.vel = (land - opos) / 0.7;
+                        pk.vz = 90.0;
+                        pk.vel = (land - opos) / 0.55;
                         w.pickups.push(pk);
                         if let Some(n) = w.npcs.get_mut(oi) {
                             n.state = NpcState::Corpse;
@@ -779,6 +790,7 @@ impl Intro {
                     // they crowd over him and feed until you're armed
                     z.attack_cd = 9.0;
                     z.speed = 0.0;
+                    z.hp = z.hp.min(9999.0);
                     let d = opos - z.pos;
                     if d.length() > 0.7 {
                         z.pos += d.normalize() * 1.2 * dt;
@@ -809,6 +821,7 @@ impl Intro {
                     for z in w.zombies.iter_mut().filter(|z| self.ambush.contains(&z.id)) {
                         z.speed = 1.4;
                         z.attack_cd = 0.6;
+                        z.hp = z.max_hp;
                     }
                     self.go(Stage::Armed);
                 } else {
