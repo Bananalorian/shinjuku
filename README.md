@@ -2,9 +2,14 @@
 
 ![Fighting The Rush Hour at Shinjuku](docs/screenshots/shinjuku-boss.png)
 
-An isometric twin-stick zombie shooter set in Tokyo's train stations. Clear five
-stations up the Yamanote line, from Akihabara to Shinjuku, catch the train between
-each one, pick an upgrade, and kill the boss waiting at the end of the line.
+An isometric twin-stick zombie shooter set in Tokyo's train stations, with two
+ways to play:
+
+- **Campaign:** a story that starts on a crowded Yamanote line train, goes wrong
+  at Kanda, and opens up into a big, explorable Akihabara where you scavenge the
+  dead for coins.
+- **Arcade:** the original run. Clear five stations from Akihabara to Shinjuku,
+  pick an upgrade card on every train ride, and kill the boss at the end of the line.
 
 **[▶ Play in your browser](https://bananalorian.github.io/shinjuku/)** ·
 **[Download for Windows, macOS, Linux](https://github.com/Bananalorian/shinjuku/releases/latest)** ·
@@ -26,13 +31,15 @@ crows picking at whatever the horde left behind.
 | ![Akihabara](docs/screenshots/akihabara.png) | ![The train arriving at Ueno](docs/screenshots/train.png) |
 | ![Ikebukuro](docs/screenshots/ikebukuro.png) | ![Shinjuku](docs/screenshots/shinjuku-boss.png) |
 
-## The opening
+## The campaign
 
-A new game starts on a crowded Yamanote line car heading into Akihabara. You ride
-in, get off with the crowd, and head up the escalator just as a quake hits and
-the lights go out. You wake up among the dead, learn to dash when the first
-infected comes for you, find an arcade cabinet you can actually play, and get a
-pistol from a police officer who doesn't make it. Then the Akihabara fight begins.
+It starts on a crowded Yamanote line car pulling into Kanda. You get off with the
+crowd and head up the escalator just as a quake hits and the lights go out. You
+wake up among the dead, learn to dash when the first infected comes for you, find
+an arcade cabinet you can actually play, and watch a police officer make his last
+stand. He throws you his pistol. Search his body for his flashlight, hold out
+until a train comes, and ride it into Akihabara: one big level of platforms and a
+maze of shuttered shops, full of wandering dead and bodies with coins on them.
 
 ## The route
 
@@ -56,7 +63,8 @@ pistol from a police officer who doesn't make it. Then the Akihabara fight begin
 | Pause | Esc / P | Start | |
 | Tilt-shift on/off | T | Y | |
 | Mute | M | Back / View | |
-| Interact | F | X | tap the button |
+| Search / interact | F | X | USE button |
+| Flashlight on/off (once found) | L | D-pad up | LIGHT button |
 | Skip the opening | hold Esc | hold Start | tap the corner |
 | Menus | arrows + Enter, or click | d-pad + A | tap |
 
@@ -112,7 +120,7 @@ To inspect the raw sounds natively, run with `SJ_WAV=1` and they're written to `
 | File | What lives there |
 |---|---|
 | `src/main.rs` | Scene flow (title, opening, play, upgrade ride, game over, victory) and debug hooks |
-| `src/intro.rs` | The scripted, playable opening: train, quake, dash lesson, arcade, the officer |
+| `src/intro.rs` | The scripted, playable opening: train, quake, dash lesson, arcade, the officer's cutscene, the search |
 | `src/arcade.rs` | STAR COMMUTER, the playable arcade cabinet |
 | `src/world.rs` | All gameplay: player, zombies, bullets, grenades, particles, train, boss, upgrades |
 | `src/level.rs` | Station definitions, baked floor/wall image, props, lights, collision, flow field |
@@ -163,6 +171,7 @@ SJ_SHOTS=60,300 SJ_STATION=1 SJ_SCENE=train SJ_AUTO=1 cargo run --release
 Renders scripted frames to `/tmp/sj_<frame>.png` and quits. `SJ_SCENE` can be
 `train`, `boss`, `bossnear`, `win`, `dead`, `upgrade`, `wall`, `crows`,
 `intro` (the opening from the top), `intro_after` (the opening from the quake on),
+`akiba` (the campaign's Akihabara; add `SJ_POS=x,y` to drop in somewhere),
 or `pos:X,Y` to drop the player at a spot. With `SJ_AUTO=1` the opening plays itself. `SJ_SIZE=844x390` simulates a phone
 screen, `SJ_NOTILT=1` starts with tilt-shift off, `SJ_AUTO=1` turns on an autopilot
 that wanders and shoots, and `SJ_STATS=1` prints horde stats when it quits (handy

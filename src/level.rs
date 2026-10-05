@@ -45,8 +45,10 @@ pub struct StationDef {
     pub tagline: &'static str,
     /// The inside of a train car (the opening scene), not a station.
     pub car: bool,
-    /// Akihabara in the opening: an escalator up to the concourse and an arcade cabinet.
+    /// The opening station: an escalator up to the concourse and an arcade cabinet.
     pub intro_props: bool,
+    /// Campaign levels: the concourse becomes a maze of shuttered shops.
+    pub maze: bool,
 }
 
 /// Doors along a car, as x centers (both sides line up).
@@ -73,6 +75,57 @@ pub fn car_def() -> StationDef {
         tagline: "",
         car: true,
         intro_props: false,
+        maze: false,
+    }
+}
+
+/// Campaign: Kanda, where the opening happens.
+pub fn kanda_def() -> StationDef {
+    StationDef {
+        name: "KANDA",
+        code: "JY02",
+        width: 30,
+        bands: vec![(Band::Platform, 5), (Band::Track, 3), (Band::Platform, 7), (Band::Track, 3), (Band::Platform, 6)],
+        quota: 40,
+        max_alive: 32,
+        spawn_rate: (1.5, 3.5),
+        mix: [1.0, 0.15, 0.0],
+        ambient: Color::new(0.15, 0.12, 0.13, 1.0),
+        wall: rgb(220, 206, 196),
+        floor: rgb(140, 134, 130),
+        lamp: Color::new(1.0, 0.92, 0.82, 1.0),
+        neon: vec![rgb(255, 200, 120), rgb(120, 200, 255)],
+        flicker: 0.15,
+        boss: false,
+        tagline: "",
+        car: false,
+        intro_props: true,
+        maze: false,
+    }
+}
+
+/// Campaign: Akihabara opened up. Platforms up top, a maze of shops and passages below.
+pub fn akiba_campaign_def() -> StationDef {
+    StationDef {
+        name: "AKIHABARA",
+        code: "JY03",
+        width: 46,
+        bands: vec![(Band::Platform, 6), (Band::Track, 3), (Band::Platform, 7), (Band::Track, 3), (Band::Platform, 5), (Band::Concourse, 30)],
+        quota: 99999,
+        max_alive: 70,
+        spawn_rate: (0.35, 0.35),
+        mix: [1.0, 0.3, 0.06],
+        ambient: Color::new(0.13, 0.09, 0.18, 1.0),
+        wall: rgb(214, 200, 210),
+        floor: rgb(136, 132, 138),
+        lamp: Color::new(0.85, 0.8, 1.0, 1.0),
+        neon: vec![rgb(255, 60, 200), rgb(40, 230, 255), rgb(255, 230, 60)],
+        flicker: 0.3,
+        boss: false,
+        tagline: "",
+        car: false,
+        intro_props: false,
+        maze: true,
     }
 }
 
@@ -98,7 +151,8 @@ pub fn stations() -> Vec<StationDef> {
             boss: false,
             tagline: "ELECTRIC TOWN. THE NEON NEVER WENT OUT.",
             car: false,
-            intro_props: true,
+            intro_props: false,
+            maze: false,
         },
         StationDef {
             name: "UENO",
@@ -119,6 +173,7 @@ pub fn stations() -> Vec<StationDef> {
             tagline: "THE PARK GATES ARE SHUT. THEY CAME UP THE STAIRS.",
             car: false,
             intro_props: false,
+            maze: false,
         },
         StationDef {
             name: "IKEBUKURO",
@@ -139,6 +194,7 @@ pub fn stations() -> Vec<StationDef> {
             tagline: "TWO MILLION COMMUTERS A DAY. MOST NEVER LEFT.",
             car: false,
             intro_props: false,
+            maze: false,
         },
         StationDef {
             name: "TAKADANOBABA",
@@ -159,6 +215,7 @@ pub fn stations() -> Vec<StationDef> {
             tagline: "THE LIGHTS ARE DYING. STAY IN THE LIGHT.",
             car: false,
             intro_props: false,
+            maze: false,
         },
         StationDef {
             name: "SHINJUKU",
@@ -190,6 +247,7 @@ pub fn stations() -> Vec<StationDef> {
             tagline: "THE BUSIEST STATION ON EARTH. END OF THE LINE.",
             car: false,
             intro_props: false,
+            maze: false,
         },
     ]
 }
@@ -224,12 +282,13 @@ pub enum PropKind {
     CarDoor,
     Straps,
     Ad(usize),
+    MazeWall(usize),
 }
 
 impl PropKind {
     /// Tall things that should fade out when the player walks behind them.
     pub fn occludes(&self) -> bool {
-        matches!(self, PropKind::Pillar | PropKind::SignName | PropKind::SignLed | PropKind::Kiosk | PropKind::Vending(_) | PropKind::Cabinet | PropKind::EscRail(_) | PropKind::EscStep(_) | PropKind::Straps | PropKind::Ad(_))
+        matches!(self, PropKind::Pillar | PropKind::SignName | PropKind::SignLed | PropKind::Kiosk | PropKind::Vending(_) | PropKind::Cabinet | PropKind::EscRail(_) | PropKind::EscStep(_) | PropKind::Straps | PropKind::Ad(_) | PropKind::MazeWall(_))
     }
 }
 
@@ -443,7 +502,7 @@ impl Map {
             // escalator rising east along the front platform, and an arcade cabinet in the corner
             if let Some((_, y0, y1)) = band_ranges.iter().rev().find(|b| b.0 == Band::Platform) {
                 let yc = (*y0 + *y1) as f32 * 0.5 + 0.6;
-                let x0 = w as f32 - 9.5;
+                let x0 = w as f32 - 2.0 - ESC_SLICES as f32 * 0.5;
                 for i in 0..ESC_SLICES {
                     let x = x0 + i as f32 * 0.5;
                     let _ = esc_height(i);
@@ -454,7 +513,9 @@ impl Map {
                 let len = ESC_SLICES as f32 * 0.5;
                 obstacles.push(Obstacle { min: vec2(x0, yc - 0.6), max: vec2(x0 + len, yc + 0.6), low: false });
                 escalator = Some((vec2(x0 - 0.35, yc), vec2(x0 + len, yc)));
-                lights.push(LightDef { pos: vec2(x0 - 0.8, yc), radius: 2.4, color: rgb(255, 250, 235), flicker: 0.0, phase: 0.0, strobe: false });
+                lights.push(LightDef { pos: vec2(x0 - 0.8, yc), radius: 2.8, color: rgb(255, 250, 235), flicker: 0.0, phase: 0.0, strobe: false });
+                lights.push(LightDef { pos: vec2(x0 + len * 0.5, yc + 1.0), radius: 3.0, color: rgb(230, 240, 255), flicker: 0.0, phase: 0.0, strobe: false });
+                lights.push(LightDef { pos: vec2(x0 + len, yc), radius: 2.4, color: rgb(255, 255, 255), flicker: 0.0, phase: 0.0, strobe: false });
             }
             if let Some((_, y0, y1)) = band_ranges.iter().find(|b| b.0 == Band::Platform && b.1 > 1) {
                 let c = vec2(2.1, (*y0 + *y1) as f32 * 0.5 - 0.35);
@@ -540,7 +601,7 @@ impl Map {
                         x += 5.0;
                     }
                     let mut x = 6.0;
-                    while x < w as f32 - 2.0 {
+                    while x < w as f32 - 2.0 && !def.maze {
                         add_prop(PropKind::Pillar, vec2(x, y1f - 1.2), vec2(0.75, 0.75), true, &mut props, &mut obstacles);
                         x += 7.0;
                     }
@@ -550,6 +611,77 @@ impl Map {
                     lights.push(LightDef { pos: vec2(1.5, yc - 1.4), radius: 1.2, color: rgb(255, 40, 30), flicker: 0.0, phase: k as f32, strobe: false });
                     lights.push(LightDef { pos: vec2(1.5, yc + 1.4), radius: 1.2, color: rgb(255, 40, 30), flicker: 0.0, phase: k as f32 + 1.0, strobe: false });
                     k += 1;
+                }
+            }
+        }
+
+        // ---- campaign maze: shuttered shops and passages below the platforms
+        if def.maze {
+            if let Some((_, c0, c1)) = band_ranges.iter().find(|b| b.0 == Band::Concourse) {
+                let top = *c0 + 4; // leave room for the ticket gates
+                let cell = 4;
+                let cols = ((w - 2) / cell) as usize;
+                let rows = ((c1 - top) / cell) as usize;
+                // recursive backtracker on a coarse grid, then knock out extra walls for loops
+                let mut seen = vec![false; cols * rows];
+                let mut open_e = vec![false; cols * rows];
+                let mut open_s = vec![false; cols * rows];
+                let mut rng = Lcg(seed.wrapping_mul(97));
+                let mut stack = vec![(0usize, 0usize)];
+                seen[0] = true;
+                while let Some(&(cx, cy)) = stack.last() {
+                    let mut nb = Vec::new();
+                    if cx + 1 < cols && !seen[cy * cols + cx + 1] { nb.push((cx + 1, cy, 0)); }
+                    if cx > 0 && !seen[cy * cols + cx - 1] { nb.push((cx - 1, cy, 1)); }
+                    if cy + 1 < rows && !seen[(cy + 1) * cols + cx] { nb.push((cx, cy + 1, 2)); }
+                    if cy > 0 && !seen[(cy - 1) * cols + cx] { nb.push((cx, cy - 1, 3)); }
+                    if nb.is_empty() {
+                        stack.pop();
+                        continue;
+                    }
+                    let (nx, ny, d) = nb[(rng.f() * nb.len() as f32) as usize % nb.len()];
+                    match d {
+                        0 => open_e[cy * cols + cx] = true,
+                        1 => open_e[cy * cols + nx] = true,
+                        2 => open_s[cy * cols + cx] = true,
+                        _ => open_s[ny * cols + cx] = true,
+                    }
+                    seen[ny * cols + nx] = true;
+                    stack.push((nx, ny));
+                }
+                for i in 0..cols * rows {
+                    if rng.f() < 0.3 { open_e[i] = true; }
+                    if rng.f() < 0.3 { open_s[i] = true; }
+                }
+                let wall = |tx: i32, ty: i32, props: &mut Vec<Prop>, obstacles: &mut Vec<Obstacle>| {
+                    let kind = ((tx * 7 + ty * 13).rem_euclid(5) as usize).min(2);
+                    props.push(Prop { kind: PropKind::MazeWall(kind), pos: vec2(tx as f32, ty as f32), size: vec2(1.0, 1.0) });
+                    obstacles.push(Obstacle { min: vec2(tx as f32, ty as f32), max: vec2(tx as f32 + 1.0, ty as f32 + 1.0), low: false });
+                };
+                let ox = 1 + ((w - 2) - cols as i32 * cell) / 2;
+                for cy in 0..rows {
+                    for cx in 0..cols {
+                        let x0 = ox + cx as i32 * cell;
+                        let y0 = top + cy as i32 * cell;
+                        // east wall of the cell, with a 2-tile doorway if open
+                        if cx + 1 < cols {
+                            for k in 0..cell {
+                                let gap = open_e[cy * cols + cx] && (1..3).contains(&k);
+                                if !gap { wall(x0 + cell - 1, y0 + k, &mut props, &mut obstacles); }
+                            }
+                        }
+                        if cy + 1 < rows {
+                            for k in 0..cell - 1 {
+                                let gap = open_s[cy * cols + cx] && (1..3).contains(&k);
+                                if !gap { wall(x0 + k, y0 + cell - 1, &mut props, &mut obstacles); }
+                            }
+                        }
+                        // neon from the shopfronts
+                        if rng.f() < 0.55 {
+                            let c = def.neon[(rng.f() * def.neon.len() as f32) as usize % def.neon.len()];
+                            lights.push(LightDef { pos: vec2(x0 as f32 + 1.5, y0 as f32 + 1.5), radius: 3.0, color: c, flicker: if rng.f() < def.flicker { 1.0 } else { 0.0 }, phase: rng.f() * 10.0, strobe: false });
+                        }
+                    }
                 }
             }
         }
@@ -853,6 +985,11 @@ impl Map {
             }
         }
         false
+    }
+
+    pub fn blocked_at(&self, p: Vec2) -> bool {
+        let (x, y) = (p.x.floor() as i32, p.y.floor() as i32);
+        x < 0 || y < 0 || x >= self.gw || y >= self.gh || self.blocked[(y * self.gw + x) as usize]
     }
 
     /// Can you step from cell (x, y) by (dx, dy)? Platform screen doors block row crossings.

@@ -41,6 +41,7 @@ pub struct Ui {
     pub tilt: bool,
     pub interact: bool,
     pub back: bool,
+    pub light: bool,
 }
 
 pub struct Input {
@@ -50,6 +51,8 @@ pub struct Input {
     pub right: Stick,
     pub dash_btn: (Vec2, f32),
     pub bomb_btn: (Vec2, f32),
+    pub light_btn: (Vec2, f32),
+    pub use_btn: (Vec2, f32),
     pub dash_pressed_vis: f32,
     pub bomb_pressed_vis: f32,
     pub pad_toast: f32,
@@ -67,6 +70,8 @@ impl Input {
             right: Stick::default(),
             dash_btn: (Vec2::ZERO, 0.0),
             bomb_btn: (Vec2::ZERO, 0.0),
+            light_btn: (Vec2::ZERO, 0.0),
+            use_btn: (Vec2::ZERO, 0.0),
             dash_pressed_vis: 0.0,
             bomb_pressed_vis: 0.0,
             pad_toast: 0.0,
@@ -88,6 +93,8 @@ impl Input {
         let br = (sh.min(sw) * 0.075).max(24.0);
         self.dash_btn = (vec2(br * 1.7, sh * 0.45), br);
         self.bomb_btn = (vec2(sw - br * 1.7, sh * 0.45), br);
+        self.light_btn = (vec2(br * 1.7, sh * 0.45 - br * 2.6), br * 0.8);
+        self.use_btn = (vec2(sw - br * 1.7, sh * 0.45 - br * 2.6), br * 0.8);
     }
 
     /// `player_screen` is the player's position in full-resolution screen pixels.
@@ -116,6 +123,10 @@ impl Input {
                     c.dash = true;
                 } else if t.position.distance(self.bomb_btn.0) < self.bomb_btn.1 * 1.3 {
                     c.grenade = true;
+                } else if t.position.distance(self.light_btn.0) < self.light_btn.1 * 1.3 {
+                    ui.light = true;
+                } else if t.position.distance(self.use_btn.0) < self.use_btn.1 * 1.3 {
+                    ui.interact = true;
                 }
             }
             if matches!(t.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
@@ -131,6 +142,10 @@ impl Input {
                     } else if t.position.distance(self.bomb_btn.0) < self.bomb_btn.1 * 1.3 {
                         c.grenade = true;
                         self.bomb_pressed_vis = 0.15;
+                    } else if t.position.distance(self.light_btn.0) < self.light_btn.1 * 1.3 {
+                        ui.light = true;
+                    } else if t.position.distance(self.use_btn.0) < self.use_btn.1 * 1.3 {
+                        ui.interact = true;
                     } else if t.position.x < sw * 0.5 {
                         if self.left.id.is_none() {
                             self.left = Stick { id: Some(t.id), origin: t.position, pos: t.position };
@@ -195,6 +210,7 @@ impl Input {
             ui.mute |= p.pressed(pad::BACK);
             ui.tilt |= p.pressed(pad::Y);
             ui.interact |= p.pressed(pad::X);
+            ui.light |= p.pressed(pad::UP);
             ui.back |= p.pressed(pad::B);
             ui.nav += p.nav();
         }
@@ -261,6 +277,9 @@ impl Input {
         }
         if is_key_pressed(KeyCode::F) {
             ui.interact = true;
+        }
+        if is_key_pressed(KeyCode::L) {
+            ui.light = true;
         }
         if is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Backspace) {
             ui.back = true;

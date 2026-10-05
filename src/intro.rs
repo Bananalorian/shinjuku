@@ -28,7 +28,9 @@ pub enum Stage {
     Wander,
     Ambush,
     Overrun,
+    FirePrompt,
     Armed,
+    Search,
     Done,
 }
 
@@ -38,6 +40,8 @@ pub enum Prompt {
     Dash,
     Play,
     Fire,
+    Search,
+    Light,
 }
 
 pub struct Dialog {
@@ -81,6 +85,10 @@ pub struct Intro {
     shot_t: f32,
     feed_t: f32,
     play_btn: Rect,
+    pub letterbox: f32,
+    cop_spot: Vec2,
+    cop_body: Option<usize>,
+    light_hint_t: f32,
 }
 
 pub fn make_car_world(art: &Art) -> World {
@@ -89,6 +97,8 @@ pub fn make_car_world(art: &Art) -> World {
     w.phase = Phase::Intro;
     w.msg = None;
     w.has_gun = false;
+    w.has_light = false;
+    w.light_on = false;
     w.locked = true;
     w.birds.clear();
     w.car_speed = 9.0;
@@ -149,6 +159,10 @@ impl Intro {
             shot_t: 0.0,
             feed_t: 0.0,
             play_btn: Rect::default(),
+            letterbox: 0.0,
+            cop_spot: Vec2::ZERO,
+            cop_body: None,
+            light_hint_t: 0.0,
         }
     }
 
@@ -177,6 +191,12 @@ impl Intro {
         w.phase = Phase::Intro;
         w.msg = None;
         w.has_gun = false;
+        w.has_light = false;
+        w.light_on = false;
+        // where the officer makes his stand: the middle platform, east of the arcade
+        if let Some(y) = w.map.track_ys.first() {
+            self.cop_spot = vec2(w.map.w as f32 * 0.55, y + 4.4);
+        }
         w.locked = false;
         w.birds.clear();
         let ty = *w.map.track_ys.last().unwrap_or(&18.5);
@@ -285,44 +305,16 @@ impl Intro {
                     self.say("ANNOUNCEMENT", "THANK YOU FOR RIDING THE YAMANOTE LINE.");
                 }
                 if at > 6.0 && at - dt <= 6.0 {
-                    self.say("ANNOUNCEMENT", "THE NEXT STATION IS KANDA.");
+                    self.say("ANNOUNCEMENT", "THIS TRAIN IS BOUND FOR UENO AND IKEBUKURO.");
                 }
-                // braking into Kanda, a short stop, then off again
-                if (11.0..14.0).contains(&at) {
+                if at > 12.0 && at - dt <= 12.0 {
+                    w.sfx.push(Sfx::Chime);
+                    self.say("ANNOUNCEMENT", "THE NEXT STATION IS KANDA. THE DOORS ON THE LEFT SIDE WILL OPEN.");
+                }
+                if at > 20.0 {
                     w.car_speed = approach(w.car_speed, 0.0, dt * 3.2);
                 }
-                if at > 11.0 && at - dt <= 11.0 {
-                    Self::lurch(w, vec2(1.0, 0.0), 1.8);
-                }
-                if at > 14.0 && at - dt <= 14.0 {
-                    w.sfx.push(Sfx::Chime);
-                    self.say("ANNOUNCEMENT", "KANDA. KANDA.");
-                    // two people get off at Kanda
-                    let mut left = 0;
-                    for n in w.npcs.iter_mut() {
-                        if left < 2 && n.state == NpcState::Stand && n.pos.y < 3.0 {
-                            let d = *CAR_DOORS.iter().min_by(|a, b| (*a - n.pos.x).abs().partial_cmp(&(*b - n.pos.x).abs()).unwrap()).unwrap();
-                            n.state = NpcState::Walk;
-                            n.target = vec2(d, 1.1);
-                            n.after = NpcState::Gone;
-                            left += 1;
-                        }
-                    }
-                }
-                if at > 19.0 {
-                    w.car_speed = approach(w.car_speed, 9.0, dt * 2.5);
-                }
-                if at > 19.0 && at - dt <= 19.0 {
-                    Self::lurch(w, vec2(-1.0, 0.0), 1.6);
-                }
-                if at > 22.0 && at - dt <= 22.0 {
-                    w.sfx.push(Sfx::Chime);
-                    self.say("ANNOUNCEMENT", "THE NEXT STATION IS AKIHABARA. THE DOORS ON THE LEFT SIDE WILL OPEN.");
-                }
-                if at > 30.0 {
-                    w.car_speed = approach(w.car_speed, 0.0, dt * 3.2);
-                }
-                if at > 30.0 && at - dt <= 30.0 {
+                if at > 20.0 && at - dt <= 20.0 {
                     Self::lurch(w, vec2(1.0, 0.0), 2.0);
                 }
                 // the car sways side to side and everyone sways with it
@@ -332,11 +324,11 @@ impl Intro {
                     let dir = if chance(0.5) { vec2(0.0, 1.0) } else { vec2(0.0, -1.0) };
                     Self::lurch(w, dir, rnd(1.2, 2.2));
                 }
-                if at > 33.0 {
+                if at > 23.0 {
                     w.car_speed = 0.0;
                     w.car_doors_open = true;
                     w.sfx.push(Sfx::Chime);
-                    self.say("ANNOUNCEMENT", "AKIHABARA. AKIHABARA.");
+                    self.say("ANNOUNCEMENT", "KANDA. KANDA.");
                     w.locked = false;
                     self.prompt = Some(Prompt::Move);
                     self.objective = Some("GET OFF THE TRAIN");
@@ -409,34 +401,41 @@ impl Intro {
                         w.locked = true;
                         self.objective = None;
                         self.marker = None;
+                        self.prompt = None;
                         self.go(Stage::Escalator);
                     }
                 }
             }
             Stage::Escalator => {
                 if let Some((a, b)) = w.map.escalator {
-                    let f = (self.t / 4.0).min(1.0);
+                    let ride = 8.5;
+                    let f = (self.t / ride).min(1.0);
                     w.player.pos = a.lerp(b, f);
                     w.player.vel = Vec2::ZERO;
                     w.player_z = f * crate::art::esc_height(crate::art::ESC_SLICES - 1) + 2.0;
                     w.player.aim_screen = vec2(0.4, -0.9).normalize();
-                    // halfway up, the ground starts to shake
-                    if self.t > 1.6 && self.t - dt <= 1.6 {
+                    w.cam_focus = Some(w.player.pos);
+                    // a third of the way up, the ground starts to shake
+                    let quake_at = 3.2;
+                    if self.t > quake_at && self.t - dt <= quake_at {
                         w.sfx.push(Sfx::Quake);
+                        self.say("YOU", "...?");
                     }
-                    if self.t > 1.6 {
-                        w.shake = (w.shake + dt * 1.5).min(1.0);
-                        w.light_scale = if chance(0.25) { rnd(0.0, 0.4) } else { rnd(0.6, 1.0) };
-                        if chance(dt * 2.5) {
+                    if self.t > quake_at {
+                        w.shake = (w.shake + dt * 0.8).min(1.0);
+                        let wild = ((self.t - quake_at) / 3.0).min(1.0);
+                        w.light_scale = if chance(0.12 + wild * 0.3) { rnd(0.0, 0.4) } else { rnd(0.7, 1.0) };
+                        if chance(dt * 2.0) {
                             let p = w.player.pos + rand_dir() * rnd(3.0, 8.0);
                             w.sfx.push(Sfx::Scream(p));
                         }
                     }
-                    if self.t > 4.4 {
+                    if self.t > quake_at + 3.6 {
                         w.light_scale = 0.0;
-                        self.black = ((self.t - 4.4) * 1.5).min(1.0);
+                        self.black = ((self.t - quake_at - 3.6) * 1.2).min(1.0);
                     }
-                    if self.t > 5.4 {
+                    if self.t > quake_at + 4.6 {
+                        w.cam_focus = None;
                         self.go(Stage::Blackout);
                     }
                 }
@@ -585,107 +584,171 @@ impl Intro {
                         self.prompt = None;
                     }
                 }
-                if self.arcade_played || self.explore_t > 75.0 {
+                // walk near the middle platform after poking around, and the officer's stand plays out
+                let near_spot = w.player.pos.distance(self.cop_spot) < 9.0;
+                if (self.arcade_played || self.explore_t > 40.0) && (near_spot || self.explore_t > 100.0) {
                     if self.start_ambush(w) {
                         self.go(Stage::Ambush);
                     }
+                } else if self.arcade_played && self.objective != Some("FIND A WAY OUT") {
+                    self.objective = Some("FIND A WAY OUT");
+                    self.marker = Some(self.cop_spot);
                 }
             }
             Stage::Ambush => {
-                // the officer holds them off... for a few shots
+                // a cutscene you watch: the camera pans over, the bars come in
                 let Some(oi) = self.officer else { self.go(Stage::Wander); return out };
+                w.locked = true;
+                self.letterbox = (self.letterbox + dt * 2.0).min(1.0);
+                self.prompt = None;
                 let opos = w.npcs.get(oi).map(|n| n.pos).unwrap_or(w.player.pos);
+                w.cam_focus = Some(opos.lerp(w.player.pos, 0.25));
                 let mut nearest: Option<(Vec2, f32)> = None;
                 for z in w.zombies.iter_mut().filter(|z| self.ambush.contains(&z.id)) {
                     z.attack_cd = 9.0;
                     z.speed = 0.0;
                     let d = opos - z.pos;
                     if d.length() > 0.6 {
-                        z.pos += d.normalize() * 1.5 * dt;
-                        z.vel = d.normalize() * 1.5;
+                        z.pos += d.normalize() * 0.85 * dt;
+                        z.vel = d.normalize() * 0.85;
                     }
                     let dist = d.length();
                     if nearest.map_or(true, |(_, nd)| dist < nd) {
                         nearest = Some((z.pos, dist));
                     }
                 }
+                if self.t > 0.6 && self.t - dt <= 0.6 {
+                    self.say("OFFICER", "STAY BACK! I SAID STAY BACK!");
+                }
+                if self.t > 4.0 && self.t - dt <= 4.0 {
+                    // more of them shamble out of the dark
+                    let away = (opos - w.player.pos).normalize_or_zero();
+                    for j in 0..2 {
+                        let zp = opos + away * 4.5 + vec2(-away.y, away.x) * (j as f32 * 2.0 - 1.0) * 1.4;
+                        w.add_zombie(ZKind::Walker, zp);
+                        if let Some(z) = w.zombies.last_mut() {
+                            z.age = 1.0;
+                            self.ambush.push(z.id);
+                        }
+                    }
+                    self.say("OFFICER", "THERE'S TOO MANY OF THEM...");
+                }
                 self.shot_t -= dt;
                 if let Some((zp, dist)) = nearest {
                     if let Some(n) = w.npcs.get_mut(oi) {
                         n.aim = zp - opos;
                     }
-                    if self.shot_t <= 0.0 && self.shots < 5 {
-                        self.shot_t = 0.45;
+                    if self.shot_t <= 0.0 && self.shots < 7 && self.t > 1.0 {
+                        self.shot_t = 0.75;
                         self.shots += 1;
-                        w.fire_bullet(opos, zp - opos, 1.6);
+                        w.fire_bullet(opos, zp - opos, 1.2);
                     }
-                    if self.t > 1.0 && self.t - dt <= 1.0 {
-                        self.say("OFFICER", "STAY BACK! STAY BACK!");
-                    }
-                    if dist < 0.75 {
-                        self.say("OFFICER", "IT'S TOO DANGEROUS HERE... TAKE THIS!");
-                        // he throws you his pistol as they drag him down
+                    if dist < 0.75 && self.t > 6.0 {
+                        self.say("OFFICER", "KID! IT'S TOO DANGEROUS HERE... TAKE THIS!");
                         let to = w.player.pos - opos;
-                        let flight = 0.7;
-                        let land = opos + to * 0.85;
+                        let land = opos + to * 0.8;
                         let mut pk = Pickup::new(opos, PickupKind::Pistol);
                         pk.z = 10.0;
                         pk.vz = 150.0;
-                        pk.vel = (land - opos) / flight;
+                        pk.vel = (land - opos) / 0.7;
                         w.pickups.push(pk);
                         if let Some(n) = w.npcs.get_mut(oi) {
                             n.state = NpcState::Corpse;
+                            n.flashlight = true;
+                            n.loot = 60;
                         }
+                        self.cop_body = Some(oi);
                         w.blood_burst(opos, (opos - zp).normalize_or_zero(), 24);
                         w.sfx.push(Sfx::Scream(opos));
-                        self.feed_t = 2.2;
-                        self.objective = Some("GRAB THE PISTOL");
+                        self.feed_t = 3.0;
                         self.go(Stage::Overrun);
                     }
-                } else {
-                    // he got them all? then one more comes out of the dark
-                    let p = opos + vec2(3.0, 0.0);
-                    w.add_zombie(ZKind::Walker, p);
+                } else if self.t > 2.0 {
+                    let away = (opos - w.player.pos).normalize_or_zero();
+                    w.add_zombie(ZKind::Walker, opos + away * 3.0);
                     if let Some(z) = w.zombies.last() {
                         self.ambush.push(z.id);
                     }
-                    self.shots = 5;
                 }
             }
             Stage::Overrun => {
                 self.feed_t -= dt;
                 let opos = self.officer.and_then(|i| w.npcs.get(i)).map(|n| n.pos).unwrap_or(w.player.pos);
                 for z in w.zombies.iter_mut().filter(|z| self.ambush.contains(&z.id)) {
-                    if self.feed_t > 0.0 {
-                        z.attack_cd = 9.0;
-                        z.speed = 0.0;
-                        let d = opos - z.pos;
-                        if d.length() > 0.6 {
-                            z.pos += d.normalize() * 1.5 * dt;
-                        }
-                        z.vel = Vec2::ZERO;
-                    } else {
-                        z.speed = z.speed.max(1.5);
+                    // they crowd over him and feed until you're armed
+                    z.attack_cd = 9.0;
+                    z.speed = 0.0;
+                    let d = opos - z.pos;
+                    if d.length() > 0.7 {
+                        z.pos += d.normalize() * 1.2 * dt;
                     }
+                    z.vel = Vec2::ZERO;
+                }
+                if self.t > 1.6 {
+                    w.cam_focus = None;
+                    w.locked = false;
+                    self.letterbox = (self.letterbox - dt * 2.0).max(0.0);
+                    self.objective = Some("GRAB THE PISTOL");
                 }
                 if w.has_gun {
+                    w.cam_focus = None;
+                    w.locked = false;
+                    self.letterbox = 0.0;
+                    w.freeze = true;
                     self.prompt = Some(Prompt::Fire);
                     self.objective = Some("PUT THEM DOWN");
+                    self.go(Stage::FirePrompt);
+                }
+            }
+            Stage::FirePrompt => {
+                // freeze until they pull the trigger once
+                if ctl.fire {
+                    w.freeze = false;
+                    self.prompt = None;
+                    for z in w.zombies.iter_mut().filter(|z| self.ambush.contains(&z.id)) {
+                        z.speed = 1.4;
+                        z.attack_cd = 0.6;
+                    }
                     self.go(Stage::Armed);
+                } else {
+                    w.freeze = true;
                 }
             }
             Stage::Armed => {
                 for z in w.zombies.iter_mut().filter(|z| self.ambush.contains(&z.id)) {
-                    z.speed = z.speed.max(1.5);
-                }
-                if ctl.fire && self.t > 1.5 {
-                    self.prompt = None;
+                    z.speed = z.speed.max(1.4);
                 }
                 let left = w.zombies.iter().filter(|z| self.ambush.contains(&z.id)).count();
                 if left == 0 && self.t > 0.5 {
-                    self.say("YOU", "THE SHOTS... MORE OF THEM ARE COMING.");
-                    self.prompt = None;
-                    self.objective = None;
+                    self.objective = Some("SEARCH THE OFFICER");
+                    self.marker = self.cop_body.and_then(|i| w.npcs.get(i)).map(|n| n.pos);
+                    self.go(Stage::Search);
+                }
+            }
+            Stage::Search => {
+                if let Some(i) = self.cop_body {
+                    let near = w.npcs.get(i).map_or(false, |n| n.pos.distance(w.player.pos) < 1.3);
+                    if self.light_hint_t <= 0.0 {
+                        self.prompt = if near { Some(Prompt::Search) } else { None };
+                    }
+                    let auto = cfg!(not(target_arch = "wasm32")) && std::env::var("SJ_AUTO").is_ok() && self.t > 1.0;
+                    if near && (ui.interact || auto) && self.light_hint_t <= 0.0 {
+                        w.search(i);
+                        self.marker = None;
+                        self.objective = None;
+                        self.prompt = Some(Prompt::Light);
+                        self.light_hint_t = 5.0;
+                        self.say("YOU", "A FLASHLIGHT. AND SOME COINS. SORRY, OFFICER.");
+                    }
+                    if self.light_hint_t > 0.0 {
+                        self.light_hint_t -= dt;
+                        if self.light_hint_t <= 0.0 {
+                            self.prompt = None;
+                            self.say("YOU", "THE SHOTS... MORE OF THEM ARE COMING.");
+                            self.go(Stage::Done);
+                        }
+                    }
+                } else {
                     self.go(Stage::Done);
                 }
             }
@@ -697,7 +760,7 @@ impl Intro {
                     w.emergency = 0.0;
                     w.phase = Phase::Fight;
                     w.kills = 0;
-                    w.say("JY03  AKIHABARA", "EMERGENCY POWER ON. SURVIVE UNTIL THE NEXT TRAIN.", 4.5);
+                    w.say("JY02  KANDA", "EMERGENCY POWER ON. HOLD OUT UNTIL A TRAIN COMES.", 4.5);
                     out.finished = true;
                 }
             }
@@ -709,9 +772,9 @@ impl Intro {
 
     fn start_ambush(&mut self, w: &mut World) -> bool {
         let p = w.player.pos;
-        for k in 0..40 {
+        for k in 0..41 {
             let a = k as f32 * 0.7;
-            let spot = p + vec2(a.cos(), a.sin()) * rnd(6.0, 8.0);
+            let spot = if k == 0 && self.cop_spot.distance(p) < 10.0 { self.cop_spot } else { p + vec2(a.cos(), a.sin()) * rnd(6.0, 8.0) };
             if spot.x < 2.5 || spot.y < 2.0 || spot.x > w.map.w as f32 - 2.0 || spot.y > w.map.h as f32 - 1.0 {
                 continue;
             }
@@ -722,9 +785,10 @@ impl Intro {
             n.officer = true;
             w.npcs.push(n);
             self.officer = Some(w.npcs.len() - 1);
+            self.marker = None;
             let away = (spot - p).normalize_or_zero();
             for j in 0..3 {
-                let zp = spot + away * rnd(3.5, 5.0) + vec2(-away.y, away.x) * (j as f32 - 1.0) * 1.2;
+                let zp = spot + away * rnd(2.8, 3.6) + vec2(-away.y, away.x) * (j as f32 - 1.0) * 1.2;
                 w.add_zombie(ZKind::Walker, zp);
                 if let Some(z) = w.zombies.last_mut() {
                     z.age = 1.0;
@@ -775,7 +839,7 @@ impl Intro {
             let bw = (sw * 0.86).min(300.0 * u);
             let bh = 30.0 * u;
             let bx = (sw - bw) * 0.5;
-            let by = sh - bh - 22.0 * u;
+            let by = sh - bh - 22.0 * u - sh * 0.11 * self.letterbox;
             let a = (d.t * 5.0).min(1.0) * ((d.dur - d.t) * 3.0).clamp(0.0, 1.0);
             draw_rectangle(bx, by, bw, bh, Color::new(0.03, 0.03, 0.05, 0.85 * a));
             draw_rectangle(bx, by, bw, u, with_alpha(if d.who == "ANNOUNCEMENT" { GREEN } else { CREAM }, a));
@@ -817,8 +881,14 @@ impl Intro {
                 (Prompt::Fire, Mode::Touch) => "DRAG ON THE RIGHT SIDE TO AIM AND FIRE",
                 (Prompt::Fire, Mode::Pad) => "RIGHT STICK TO AIM AND FIRE",
                 (Prompt::Fire, Mode::Mouse) => "AIM WITH THE MOUSE, HOLD LEFT CLICK TO FIRE",
+                (Prompt::Search, Mode::Touch) => "TAP USE TO SEARCH",
+                (Prompt::Search, Mode::Pad) => "PRESS X TO SEARCH",
+                (Prompt::Search, Mode::Mouse) => "PRESS F TO SEARCH",
+                (Prompt::Light, Mode::Touch) => "TAP LIGHT TO TURN YOUR FLASHLIGHT ON AND OFF",
+                (Prompt::Light, Mode::Pad) => "D-PAD UP TURNS YOUR FLASHLIGHT ON AND OFF",
+                (Prompt::Light, Mode::Mouse) => "PRESS L TO TURN YOUR FLASHLIGHT ON AND OFF",
             };
-            let big = p == Prompt::Dash;
+            let big = matches!(p, Prompt::Dash | Prompt::Fire);
             let px = if big { 3.0 * u } else { 2.0 * u };
             let mut px2 = px;
             while px2 > u && hud::text_w(text, px2) > sw * 0.9 {
@@ -838,6 +908,11 @@ impl Intro {
             }
         }
 
+        if self.letterbox > 0.0 {
+            let bar = sh * 0.11 * self.letterbox;
+            draw_rectangle(0.0, 0.0, sw, bar, BLACK);
+            draw_rectangle(0.0, sh - bar, sw, bar, BLACK);
+        }
         if self.black > 0.0 {
             draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, self.black));
         }

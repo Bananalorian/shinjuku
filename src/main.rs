@@ -31,9 +31,25 @@ use macroquad::prelude::*;
 use util::*;
 use world::*;
 
+#[derive(Clone, Copy, PartialEq)]
+enum GameMode {
+    Campaign,
+    Arcade,
+}
+
+/// What carries from one campaign level to the next.
+#[derive(Clone, Copy, Default)]
+struct Camp {
+    level: u8, // 1 Kanda, 2 Akihabara
+    has_light: bool,
+    light_on: bool,
+    coins: u32,
+}
+
 enum Scene {
     Title,
     Intro,
+    Ride,
     Play,
     Upgrade { choices: [usize; 3] },
     GameOver,
@@ -60,6 +76,9 @@ struct Game {
     intro: Option<intro::Intro>,
     arcade: Option<arcade::Arcade>,
     arcade_hi: u32,
+    game_mode: GameMode,
+    menu_sel: usize,
+    camp: Camp,
 }
 
 impl Game {
@@ -83,6 +102,9 @@ impl Game {
             intro: None,
             arcade: None,
             arcade_hi: 0,
+            game_mode: GameMode::Campaign,
+            menu_sel: 0,
+            camp: Camp::default(),
             world,
             art,
             audio,
@@ -138,8 +160,67 @@ impl Game {
         self.start_station(0);
     }
 
+    /// Arcade: the original run, Akihabara to Shinjuku with upgrade cards.
+    fn start_arcade(&mut self) {
+        self.game_mode = GameMode::Arcade;
+        self.stats = Stats::arcade();
+        self.world.total_kills = 0;
+        self.run_time = 0.0;
+        self.start_station(0);
+    }
+
+    fn save_camp(&mut self) {
+        self.camp.has_light = self.world.has_light;
+        self.camp.light_on = self.world.light_on;
+        self.camp.coins = self.world.coins;
+    }
+
+    /// Campaign, Kanda: hold out until a train comes (after the opening, or on retry).
+    fn start_kanda(&mut self) {
+        self.camp.level = 1;
+        self.stats_at_start = self.stats;
+        self.kills_at_start = self.world.total_kills;
+        let mut w = World::from_def(&level::kanda_def(), "FOR AKIHABARA", 0, &self.art, self.stats, self.kills_at_start, false);
+        w.story = true;
+        w.has_light = self.camp.has_light;
+        w.light_on = self.camp.light_on;
+        w.coins = self.camp.coins;
+        w.birds.clear();
+        w.say("JY02  KANDA", "HOLD OUT UNTIL A TRAIN COMES.", 4.0);
+        self.world = w;
+        self.scene = Scene::Play;
+        self.scene_t = 0.0;
+        self.fade = 1.0;
+        self.paused = false;
+        self.input.release_all();
+    }
+
+    /// Campaign, Akihabara: the station opened up. Explore, kill, loot.
+    fn start_akiba(&mut self) {
+        self.camp.level = 2;
+        self.stats_at_start = self.stats;
+        self.kills_at_start = self.world.total_kills;
+        let mut w = World::from_def(&level::akiba_campaign_def(), "OUT OF SERVICE", 1, &self.art, self.stats, self.kills_at_start, false);
+        w.story = true;
+        w.campaign = true;
+        w.has_light = self.camp.has_light;
+        w.light_on = self.camp.light_on;
+        w.coins = self.camp.coins;
+        w.populate_idle(55);
+        w.scatter_bodies(30);
+        w.say("JY03  AKIHABARA", "THE WHOLE STATION IS OPEN. SEARCH THE DEAD FOR COINS.", 5.0);
+        self.world = w;
+        self.scene = Scene::Play;
+        self.scene_t = 0.0;
+        self.fade = 1.0;
+        self.paused = false;
+        self.input.release_all();
+    }
+
     /// A new game starts with the opening on the train.
     fn start_intro(&mut self) {
+        self.game_mode = GameMode::Campaign;
+        self.camp = Camp::default();
         self.stats = Stats::default();
         self.stats_at_start = self.stats;
         self.kills_at_start = 0;
@@ -178,6 +259,10 @@ impl Game {
         if ui.mute {
             self.audio.toggle_mute();
         }
+        if ui.light && self.world.has_light {
+            self.world.light_on = !self.world.light_on;
+            self.audio.play(Id::Select, 0.6);
+        }
         if ui.tilt {
             self.fx.tilt_shift = !self.fx.tilt_shift;
             let s = if self.fx.tilt_shift { "TILT-SHIFT ON" } else { "TILT-SHIFT OFF" };
@@ -202,6 +287,7 @@ impl Game {
             },
             Scene::Upgrade { .. } => &[(Id::Ride, 0.55)],
             Scene::GameOver => &[(Id::Hum, 0.1)],
+            Scene::Ride => &[(Id::Ride, 0.55)],
             Scene::Victory => &[(Id::Ambient, 0.4)],
         };
         self.audio.set_loops(loops);
@@ -215,10 +301,28 @@ impl Game {
                 let center = iso(self.world.map.w as f32 * 0.5, self.world.map.h as f32 * 0.5);
                 self.world.cam = center + vec2((t * 0.12).sin() * 140.0, (t * 0.09).cos() * 50.0);
                 self.fx.render(&self.world, &self.art, 1.25);
-                hud::draw_title(&self.art, u, t, &self.defs, mode);
-                if ui.confirm && t > 0.4 {
+                if ui.nav.y != 0 {
+                    self.menu_sel = (self.menu_sel as i32 + ui.nav.y).rem_euclid(2) as usize;
+                    self.audio.play(Id::Select, 0.5);
+                }
+                let rects = hud::draw_title(&self.art, u, t, &self.defs, mode, self.menu_sel);
+                if mode == Mode::Mouse {
+                    let m: Vec2 = mouse_position().into();
+                    if let Some(i) = rects.iter().position(|r| r.contains(m)) {
+                        self.menu_sel = i;
+                    }
+                }
+                let mut go = ui.confirm && t > 0.4;
+                if let Some(tap) = ui.tap {
+                    if let Some(i) = rects.iter().position(|r| r.contains(tap)) {
+                        self.menu_sel = i;
+                    } else if mode == Mode::Touch {
+                        go = false; // taps outside the menu just pick nothing
+                    }
+                }
+                if go {
                     self.audio.play(Id::Select, 1.0);
-                    self.start_intro();
+                    if self.menu_sel == 0 { self.start_intro(); } else { self.start_arcade(); }
                 }
             }
             Scene::Intro => {
@@ -245,7 +349,8 @@ impl Game {
                 } else if let Some(mut it) = self.intro.take() {
                     let out = it.update(&mut self.world, &mut ctl, &ui, mode, dt, &self.fx);
                     if out.need_platform {
-                        self.world = World::new(0, &self.defs, &self.art, self.stats, 0, false);
+                        self.world = World::from_def(&level::kanda_def(), "FOR AKIHABARA", 0, &self.art, self.stats, 0, false);
+                        self.world.story = true;
                         it.setup_platform(&mut self.world);
                     }
                     self.world.update(dt, &ctl);
@@ -268,8 +373,13 @@ impl Game {
                         self.scene_t = 0.0;
                     } else if out.finished {
                         if out.skipped {
-                            self.start_station(0);
+                            // skipping still hands you what the opening would have
+                            self.camp.has_light = true;
+                            self.camp.light_on = true;
+                            self.start_kanda();
                         } else {
+                            self.camp.level = 1;
+                            self.save_camp();
                             self.stats_at_start = self.stats;
                             self.kills_at_start = 0;
                             self.scene = Scene::Play;
@@ -278,6 +388,23 @@ impl Game {
                     } else {
                         self.intro = Some(it);
                     }
+                }
+            }
+            Scene::Play if self.arcade.is_some() => {
+                let mut a = self.arcade.take().unwrap();
+                let mut x = ctl.mv.x;
+                if is_key_down(KeyCode::Left) { x -= 1.0; }
+                if is_key_down(KeyCode::Right) { x += 1.0; }
+                let ain = arcade::ArcadeIn { x: x.clamp(-1.0, 1.0), fire: ctl.fire || ctl.dash || ui.confirm || is_key_down(KeyCode::Space), exit: ui.back || ui.pause };
+                let leave = a.update(dt, &ain);
+                for id in a.sounds.drain(..) {
+                    self.audio.play(id, 1.0);
+                }
+                self.arcade_hi = self.arcade_hi.max(a.hi);
+                self.fx.render(&self.world, &self.art, 1.35);
+                a.draw(&self.art, u);
+                if !leave {
+                    self.arcade = Some(a);
                 }
             }
             Scene::Play => {
@@ -296,6 +423,27 @@ impl Game {
                 }
                 self.fx.render(&self.world, &self.art, 1.35);
                 hud::draw_hud(&self.world, &self.art, u, &self.defs, &self.input);
+                if !self.paused && self.world.story {
+                    // search the dead
+                    if let Some(i) = self.world.searchable() {
+                        let at = self.fx.to_screen(&self.world, self.world.npcs[i].pos, 14.0);
+                        let label = match mode { Mode::Touch => "USE: SEARCH", Mode::Pad => "X: SEARCH", Mode::Mouse => "F: SEARCH" };
+                        hud::text_c(&self.art, label, at.x, at.y - 10.0 * u, u, hud::CREAM);
+                        if ui.interact {
+                            self.world.search(i);
+                        }
+                    } else if let Some(a) = self.world.map.arcade {
+                        if self.world.player.pos.distance(a) < 1.3 {
+                            let at = self.fx.to_screen(&self.world, a, 34.0);
+                            let label = match mode { Mode::Touch => "USE: PLAY", Mode::Pad => "X: PLAY", Mode::Mouse => "F: PLAY" };
+                            hud::text_c(&self.art, label, at.x, at.y - 10.0 * u, u, hud::CREAM);
+                            if ui.interact {
+                                self.arcade = Some(arcade::Arcade::new(self.arcade_hi));
+                                self.audio.play(Id::Coin, 1.0);
+                            }
+                        }
+                    }
+                }
                 if self.paused {
                     hud::draw_pause(&self.art, u, mode, self.fx.tilt_shift, self.audio.muted);
                 }
@@ -303,6 +451,12 @@ impl Game {
                 for e in events {
                     match e {
                         Event::GotPistol => {}
+                        Event::Boarded if self.game_mode == GameMode::Campaign => {
+                            self.save_camp();
+                            self.scene = Scene::Ride;
+                            self.scene_t = 0.0;
+                            self.fade = 1.0;
+                        }
                         Event::Boarded => {
                             if self.world.station + 1 < self.defs.len() {
                                 self.scene = Scene::Upgrade { choices: Self::roll_upgrades() };
@@ -360,11 +514,21 @@ impl Game {
                     }
                 }
             }
+            Scene::Ride => {
+                hud::draw_ride(&self.art, u, self.scene_t, "AKIHABARA", "JY03");
+                if self.scene_t > 4.0 || (ui.confirm && self.scene_t > 1.0) {
+                    self.start_akiba();
+                }
+            }
             Scene::GameOver => {
                 self.world.update(dt, &Controls::default());
                 self.world.sfx.clear();
                 self.fx.render(&self.world, &self.art, 0.7);
-                let lines = vec![format!("{} KILLS", self.world.total_kills), "YOUR UPGRADES ARE KEPT".to_string()];
+                let lines = if self.game_mode == GameMode::Campaign {
+                    vec![format!("{} KILLS", self.world.total_kills), format!("{} COINS", self.camp.coins)]
+                } else {
+                    vec![format!("{} KILLS", self.world.total_kills), "YOUR UPGRADES ARE KEPT".to_string()]
+                };
                 let prompt = match mode {
                     Mode::Touch => "TAP TO RETRY THIS STATION",
                     Mode::Pad => "PRESS A TO RETRY",
@@ -375,8 +539,15 @@ impl Game {
                 if ui.confirm && self.scene_t > 1.0 {
                     self.stats = self.stats_at_start;
                     self.world.total_kills = self.kills_at_start;
-                    let s = self.world.station;
-                    self.start_station(s);
+                    if self.game_mode == GameMode::Campaign {
+                        match self.camp.level {
+                            2 => self.start_akiba(),
+                            _ => self.start_kanda(),
+                        }
+                    } else {
+                        let s = self.world.station;
+                        self.start_station(s);
+                    }
                 }
             }
             Scene::Victory => {
@@ -402,6 +573,13 @@ impl Game {
                     self.fade = 1.0;
                 }
             }
+        }
+        for (pos, txt, t, col) in &self.world.floaters {
+            if *t < 0.0 {
+                continue;
+            }
+            let at = self.fx.to_screen(&self.world, *pos, 18.0 + t * 14.0);
+            hud::text_c(&self.art, txt, at.x, at.y, u, with_alpha(*col, (1.6 - t).min(1.0)));
         }
         if let Some((msg, t)) = &mut self.toast {
             *t -= dt;
@@ -492,7 +670,12 @@ fn intro_autopilot(game: &mut Game, frame: u32) -> Controls {
     let mut c = Controls::default();
     let w = &game.world;
     let p = w.player.pos;
-    let toward = |t: Vec2| world_to_screen_dir(t - p).normalize_or_zero();
+    // path around the screen doors and pillars instead of walking into them
+    let toward = |t: Vec2| {
+        let field = w.map.bfs(t);
+        let d = if p.distance(t) > 1.2 { w.map.dir_in(&field, p).unwrap_or(t - p) } else { t - p };
+        world_to_screen_dir(d).normalize_or_zero()
+    };
     let Some(it) = game.intro.as_mut() else { return c };
     match it.stage {
         CarArrive => {
@@ -514,6 +697,18 @@ fn intro_autopilot(game: &mut Game, frame: u32) -> Controls {
                     c.mv = toward(a);
                 } else if !it.arcade_played && game.arcade.is_none() {
                     game.arcade = Some(arcade::Arcade::new(0));
+                } else if let Some(m) = it.marker {
+                    c.mv = toward(m);
+                }
+            }
+        }
+        FirePrompt => c.fire = true,
+        Search => {
+            if let Some(m) = it.marker {
+                if p.distance(m) > 1.0 {
+                    c.mv = toward(m);
+                } else if let Some(i) = game.world.searchable() {
+                    let _ = i;
                 }
             }
         }
@@ -573,10 +768,25 @@ async fn main() {
             game.start_intro();
         }
         if d.scene == "intro_after" {
-            game.world = World::new(0, &game.defs, &game.art, game.stats, 0, false);
+            game.world = World::from_def(&level::kanda_def(), "FOR AKIHABARA", 0, &game.art, game.stats, 0, false);
             if let Some(it) = &mut game.intro {
                 it.setup_platform(&mut game.world);
                 it.setup_aftermath(&mut game.world);
+            }
+        }
+        if d.scene == "akiba" {
+            game.camp.has_light = true;
+            game.camp.light_on = true;
+            game.game_mode = GameMode::Campaign;
+            game.start_akiba();
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Ok(pos) = std::env::var("SJ_POS") {
+                let v: Vec<f32> = pos.split(',').filter_map(|n| n.parse().ok()).collect();
+                if v.len() == 2 {
+                    game.world.player.pos = vec2(v[0], v[1]);
+                    game.world.cam = iso(v[0], v[1]);
+                    game.world.msg = None;
+                }
             }
         }
         if let Some(s) = d.station {

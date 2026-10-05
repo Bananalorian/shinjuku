@@ -133,6 +133,7 @@ impl Audio {
                 Sfx::Scream(p) => self.play(Id::Scream, Self::falloff(world, p)),
                 Sfx::Retch(p) => self.play(Id::Retch, Self::falloff(world, p)),
                 Sfx::Attract(p) => self.play(Id::Attract, Self::falloff(world, p)),
+                Sfx::Coin => self.play(Id::Coin, 1.0),
             }
         }
     }

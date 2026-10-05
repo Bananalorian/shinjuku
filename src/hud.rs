@@ -80,15 +80,19 @@ pub fn draw_hud(w: &World, art: &Art, u: f32, defs: &[StationDef], input: &Input
     text(art, w.name, nx, m, 2.0 * u, CREAM);
     let prog = (w.kills as f32 / w.quota as f32).min(1.0);
     let bw = 92.0 * u;
-    bar(nx, m + 17.0 * u, bw, 3.0 * u, prog, GREEN, u);
+    if !w.campaign {
+        bar(nx, m + 17.0 * u, bw, 3.0 * u, prog, GREEN, u);
+    }
     let label = match w.phase {
+        _ if w.campaign => "EXPLORE. SEARCH THE DEAD.".to_string(),
         Phase::Train => "BOARD THE TRAIN".to_string(),
         Phase::Boss => "KILL THE RUSH HOUR".to_string(),
         _ => format!("CLEARED {}/{}", w.kills.min(w.quota), w.quota),
     };
     text(art, &label, nx, m + 23.0 * u, u, DIM);
 
-    // the route along the Yamanote line
+    // the route along the Yamanote line (arcade only)
+    if !w.story {
     let n = defs.len();
     let gap = 15.0 * u;
     let rx = sw - m - gap * (n - 1) as f32 - 3.0 * u;
@@ -110,6 +114,7 @@ pub fn draw_hud(w: &World, art: &Art, u: f32, defs: &[StationDef], input: &Input
         text(art, s, sw - m - text_w(s, u), ry + 7.0 * u, u, RED);
     }
 
+    }
     // health, grenade, dash
     let by = sh - m - 4.0 * u;
     let hk = w.player.hp / w.stats.max_hp;
@@ -126,6 +131,13 @@ pub fn draw_hud(w: &World, art: &Art, u: f32, defs: &[StationDef], input: &Input
     bar(dx, by, 23.0 * u, 4.0 * u, dk, Color::new(0.35, 0.9, 1.0, 1.0), u);
     let ks = format!("{} KILLS", w.total_kills);
     text(art, &ks, sw - m - text_w(&ks, u), by - 2.0 * u, u, DIM);
+    if w.story {
+        let cs = format!("{}", w.coins);
+        let cx = sw - m - text_w(&cs, 2.0 * u);
+        let cy = by - 22.0 * u;
+        text(art, &cs, cx, cy, 2.0 * u, Color::new(1.0, 0.85, 0.3, 1.0));
+        draw_texture_ex(&art.tex, cx - 14.0 * u, cy + 2.0 * u, WHITE, DrawTextureParams { source: Some(art.coin), dest_size: Some(vec2(10.0 * u, 10.0 * u)), ..Default::default() });
+    }
 
     // boss bar
     if let Some(b) = w.boss() {
@@ -162,7 +174,7 @@ fn draw_touch(art: &Art, input: &Input, u: f32) {
             draw_circle(k.x, k.y, r * 0.38, Color::new(1.0, 1.0, 1.0, 0.25));
         }
     }
-    for ((c, br), label, vis) in [(input.dash_btn, "DASH", input.dash_pressed_vis), (input.bomb_btn, "NADE", input.bomb_pressed_vis)] {
+    for ((c, br), label, vis) in [(input.dash_btn, "DASH", input.dash_pressed_vis), (input.bomb_btn, "NADE", input.bomb_pressed_vis), (input.light_btn, "LIGHT", 0.0), (input.use_btn, "USE", 0.0)] {
         let a = if vis > 0.0 { 0.45 } else { 0.18 };
         draw_circle(c.x, c.y, br, Color::new(1.0, 1.0, 1.0, a * 0.5));
         draw_circle_lines(c.x, c.y, br, 2.0, Color::new(1.0, 1.0, 1.0, a + 0.15));
@@ -171,7 +183,7 @@ fn draw_touch(art: &Art, input: &Input, u: f32) {
     }
 }
 
-pub fn draw_title(art: &Art, u: f32, t: f32, defs: &[StationDef], mode: Mode) {
+pub fn draw_title(art: &Art, u: f32, t: f32, defs: &[StationDef], mode: Mode, sel: usize) -> Vec<Rect> {
     let (sw, sh) = (screen_width(), screen_height());
     draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, 0.35));
     let big = fit("TO SHINJUKU", 4.0 * u, sw * 0.9);
@@ -185,34 +197,63 @@ pub fn draw_title(art: &Art, u: f32, t: f32, defs: &[StationDef], mode: Mode) {
     let route: Vec<String> = defs.iter().map(|d| d.name.to_string()).collect();
     let line = route.join(" > ");
     let lp = fit(&line, u, sw * 0.92);
-    text_c(art, &line, sw * 0.5, sh * 0.62, lp, GREEN);
+    text_c(art, &line, sw * 0.5, sh * 0.55, lp, GREEN);
 
     let help = match mode {
+        _ if sh < 0.0 => "",
         Mode::Touch => "LEFT STICK MOVE   RIGHT STICK AIM   AUTO-AIM WHEN IDLE",
         Mode::Pad => "L-STICK MOVE   R-STICK AIM + FIRE   A DASH   RB GRENADE   START PAUSE",
         Mode::Mouse => "WASD MOVE   MOUSE AIM + FIRE   SPACE DASH   RIGHT CLICK GRENADE",
     };
-    text_c(art, help, sw * 0.5, sh * 0.72, fit(help, u, sw * 0.92), CREAM);
+    text_c(art, help, sw * 0.5, sh * 0.62, fit(help, u, sw * 0.92), CREAM);
     let opts = match mode {
         Mode::Touch => "",
         Mode::Pad => "Y TILT-SHIFT   BACK MUTE",
         Mode::Mouse => "T TILT-SHIFT   M MUTE   ESC PAUSE",
     };
     if !opts.is_empty() {
-        text_c(art, opts, sw * 0.5, sh * 0.72 + 11.0 * u, fit(opts, u, sw * 0.92), DIM);
+        text_c(art, opts, sw * 0.5, sh * 0.62 + 11.0 * u, fit(opts, u, sw * 0.92), DIM);
     }
-    if (t * 2.0) as i32 % 2 == 0 {
-        let s = match mode {
-            Mode::Touch => "TAP TO START",
-            Mode::Pad => "PRESS A TO START",
-            Mode::Mouse => "PRESS ENTER OR CLICK TO START",
-        };
-        text_c(art, s, sw * 0.5, sh * 0.82, fit(s, 2.0 * u, sw * 0.9), CREAM);
+    // the menu
+    let items = [("CAMPAIGN", "THE STORY: FROM KANDA INTO AKIHABARA"), ("ARCADE", "THE ORIGINAL RUN: 5 STATIONS, UPGRADE CARDS")];
+    let mut rects = Vec::new();
+    for (i, (name, desc)) in items.iter().enumerate() {
+        let y = sh * 0.73 + i as f32 * 18.0 * u;
+        let px = fit(name, 2.0 * u, sw * 0.5);
+        let w = text_w(name, px) + 16.0 * u;
+        let r = Rect::new(sw * 0.5 - w * 0.5, y - 3.0 * u, w, 7.0 * px + 6.0 * u);
+        let on = i == sel;
+        if on {
+            draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.43, 0.72, 0.18, 0.35 + 0.15 * (t * 4.0).sin()));
+        }
+        text_c(art, name, sw * 0.5, y, px, if on { CREAM } else { DIM });
+        if on {
+            text_c(art, desc, sw * 0.5, sh * 0.73 + 40.0 * u, fit(desc, u, sw * 0.9), GREEN);
+        }
+        rects.push(r);
     }
+    let _ = (mode, t);
     if sh > sw {
         let s = "TIP: ROTATE YOUR PHONE";
-        text_c(art, s, sw * 0.5, sh * 0.9, fit(s, u, sw * 0.9), DIM);
+        text_c(art, s, sw * 0.5, sh * 0.95, fit(s, u, sw * 0.9), DIM);
     }
+    rects
+}
+
+/// Between stations in the campaign: just the ride, no cards.
+pub fn draw_ride(art: &Art, u: f32, t: f32, name: &str, code: &str) {
+    let (sw, sh) = (screen_width(), screen_height());
+    clear_background(Color::new(0.03, 0.03, 0.05, 1.0));
+    for i in 0..9 {
+        let speed = 900.0 * u / 3.0;
+        let x = sw - ((t * speed + i as f32 * sw / 4.5) % (sw * 2.0));
+        let y = sh * (0.3 + (i % 3) as f32 * 0.035);
+        draw_rectangle(x, y, 40.0 * u, u * 1.5, Color::new(1.0, 0.85, 0.55, 0.6));
+        draw_rectangle(x - 60.0 * u, y, 60.0 * u, u * 1.5, Color::new(1.0, 0.85, 0.55, 0.12));
+    }
+    let title = format!("NEXT STOP: {}", name);
+    text_c(art, &title, sw * 0.5, sh * 0.48, fit(&title, 3.0 * u, sw * 0.9), CREAM);
+    text_c(art, code, sw * 0.5, sh * 0.48 + 26.0 * u, u, GREEN);
 }
 
 /// The ride between stations: tunnel lights streaking past and three upgrade cards.

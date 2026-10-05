@@ -257,6 +257,7 @@ impl Fx {
         draw_particles(w, art, true, view);
         draw_bullets(w, art);
         draw_car_windows(w, art);
+        draw_torch_glow(w, art);
         gl_use_default_material();
 
         // 2. light
@@ -434,6 +435,7 @@ fn draw_sorted(w: &World, art: &Art, view: Rect) {
                     }
                     PropKind::Straps => (&art.tex, &art.straps),
                     PropKind::Ad(n) => (&art.tex, &art.ads[n % art.ads.len()]),
+                    PropKind::MazeWall(k) => (&art.tex, &art.maze[k % art.maze.len()]),
                     PropKind::SignName => (&w.map.signs.tex, &w.map.signs.name),
                     PropKind::SignLed => (&w.map.signs.tex, &w.map.signs.led[blink]),
                 };
@@ -739,6 +741,19 @@ fn draw_car_windows(w: &World, art: &Art) {
     }
 }
 
+/// A small hot spot at the lens, at hand height, so the light reads as held.
+fn draw_torch_glow(w: &World, art: &Art) {
+    if !(w.has_light && w.light_on) || w.demo || w.phase == Phase::Dead || w.player_lying {
+        return;
+    }
+    let p = &w.player;
+    let gz = w.map.ground_z(p.pos);
+    let at = iso3(p.pos.x, p.pos.y, gz + w.player_z + 9.0) + p.aim_screen * 6.0;
+    for (s, a) in [(7.0f32, 0.35f32), (3.0, 0.9)] {
+        draw_texture_ex(&art.tex, (at.x - s * 0.5).round(), (at.y - s * 0.5).round(), Color::new(1.0, 0.97, 0.85, a), DrawTextureParams { source: Some(art.soft), dest_size: Some(vec2(s, s)), ..Default::default() });
+    }
+}
+
 fn draw_bullets(w: &World, art: &Art) {
     for b in &w.bullets {
         let gz = w.map.ground_z(b.pos).max(-2.0);
@@ -853,6 +868,14 @@ fn draw_lights(w: &World, view: Rect) {
     for k in &w.pickups {
         light_circle(k.pos, 1.2, Color::new(0.6, 1.0, 0.7, 1.0), 0.35);
     }
+    // the officer's own flashlight, so you can see his last stand
+    for n in &w.npcs {
+        if n.officer && n.state == NpcState::Shoot {
+            let a = n.aim.normalize_or_zero();
+            light_circle(n.pos, 2.0, Color::new(0.9, 0.9, 1.0, 1.0), 0.35);
+            light_cone(n.pos + a * 0.55, a, 6.5, 0.4, Color::new(1.0, 0.95, 0.8, 1.0), 0.8);
+        }
+    }
     for z in &w.zombies {
         if z.kind == ZKind::Boss {
             light_circle(z.pos, 3.0, Color::new(1.0, 0.25, 0.1, 1.0), 0.3);
@@ -900,7 +923,10 @@ fn draw_lights(w: &World, view: Rect) {
     }
     if !w.demo && w.phase != Phase::Dead {
         let p = &w.player;
-        light_circle(p.pos, 2.3, Color::new(0.9, 0.9, 1.0, 1.0), 0.32);
-        light_cone(p.pos + p.aim * 0.2, p.aim, 7.5, 0.42, Color::new(1.0, 0.96, 0.85, 1.0), 0.75);
+        light_circle(p.pos, if w.has_light && w.light_on { 2.3 } else { 1.6 }, Color::new(0.9, 0.9, 1.0, 1.0), if w.has_light && w.light_on { 0.32 } else { 0.2 });
+        if w.has_light && w.light_on {
+            // the beam leaves the hand and lands on the floor ahead of you
+            light_cone(p.pos + p.aim * 0.55, p.aim, 7.5, 0.4, Color::new(1.0, 0.96, 0.85, 1.0), 0.75);
+        }
     }
 }

@@ -6,7 +6,7 @@ use crate::util::*;
 use macroquad::prelude::*;
 use std::collections::HashMap;
 
-const ATLAS: u32 = 1024;
+const ATLAS: u32 = 2048;
 const OUTLINE: Color = Color { r: 0.05, g: 0.035, b: 0.06, a: 1.0 };
 
 /// A sprite in the atlas. `anchor` is the pixel that sits on the object's ground point.
@@ -67,12 +67,14 @@ pub struct Art {
     pub car_door: Spr,
     pub straps: Spr,
     pub ads: Vec<Spr>,
+    pub maze: Vec<Spr>,
+    pub coin: Rect,
 }
 
-pub const ESC_SLICES: usize = 10;
+pub const ESC_SLICES: usize = 14;
 
 pub fn esc_height(i: usize) -> f32 {
-    3.0 + i as f32 * 3.2
+    3.0 + i as f32 * 3.0
 }
 
 /// Station-specific hanging signs, built per map (they carry the station's name).
@@ -957,32 +959,99 @@ fn make_crow(frame: usize) -> Cv {
     c
 }
 
-fn make_esc_step(h: f32) -> (Image, Vec2) {
+fn make_esc_step(h: f32, bottom: bool) -> (Image, Vec2) {
+    // brushed-steel treads with bright yellow edge lines; the bottom slice gets the comb plate
     iso_box(0.5, 1.0, h, |f, u, v| {
         let k = face_k(f);
         Some(match f {
             Face::Top => {
                 let gi = (v * 16.0) as i32;
-                if u < 0.06 { rgb(240, 200, 40) } else if gi % 2 == 0 { rgb(70, 72, 78) } else { rgb(110, 112, 120) }
+                if u < 0.07 || (bottom && u < 0.2) {
+                    rgb(255, 214, 40)
+                } else if v < 0.06 || v > 0.94 {
+                    rgb(250, 210, 50)
+                } else if gi % 2 == 0 {
+                    rgb(150, 156, 166)
+                } else {
+                    rgb(196, 202, 212)
+                }
             }
-            Face::Right => shade(rgb(90, 92, 100), k),
-            Face::Left => shade(if (v as i32) % 3 == 0 { rgb(60, 62, 68) } else { rgb(120, 124, 132) }, k),
+            Face::Right => shade(rgb(130, 136, 148), k),
+            Face::Left => {
+                // the riser: grooves, with the skirt-light strip near the top
+                if v > h - 2.0 {
+                    rgb(255, 250, 230)
+                } else if (v as i32) % 2 == 0 {
+                    shade(rgb(110, 116, 128), k)
+                } else {
+                    shade(rgb(160, 166, 178), k)
+                }
+            }
         })
     })
 }
 
 fn make_esc_rail(h: f32) -> (Image, Vec2) {
-    let (img, a) = iso_box(0.5, 0.1, h + 12.0, |f, _u, v| {
-        let top = v > h + 9.5;
-        Some(if top || f == Face::Top {
-            rgb(24, 24, 28)
-        } else if v < h - 2.0 {
-            shade(rgb(150, 154, 162), face_k(f))
+    let top = h + 12.0;
+    let (img, a) = iso_box(0.5, 0.12, top, |f, _u, v| {
+        Some(if v > top - 2.5 || f == Face::Top {
+            rgb(18, 18, 22) // rubber handrail
+        } else if v > top - 3.5 {
+            rgb(230, 240, 255) // lit strip under the handrail
+        } else if v < h - 1.0 {
+            shade(rgb(176, 182, 194), face_k(f)) // steel skirt
+        } else if v < h + 0.5 {
+            rgb(255, 250, 230) // skirt light
         } else {
-            Color::new(0.6, 0.75, 0.85, 0.55) // glass
+            Color::new(0.62, 0.82, 0.92, 0.7) // glass balustrade
         })
     });
-    (img, a)
+    (outline_image(&img), a)
+}
+
+fn make_maze_wall(kind: usize) -> (Image, Vec2) {
+    // shuttered shops, tiled walls with anime-style posters, neon storefronts
+    let (img, a) = iso_box(1.0, 1.0, 34.0, |f, u, v| {
+        let k = face_k(f);
+        let ui = (u * 16.0) as i32;
+        let c = match f {
+            Face::Top => rgb(30, 30, 36),
+            _ => match kind {
+                0 => {
+                    if v > 30.0 {
+                        rgb(80, 80, 88)
+                    } else if (v as i32) % 3 == 0 {
+                        rgb(120, 124, 132)
+                    } else {
+                        rgb(168, 172, 180)
+                    }
+                }
+                1 => {
+                    if (8.0..26.0).contains(&v) && (0.2..0.8).contains(&u) {
+                        let pal = [rgb(255, 120, 180), rgb(120, 210, 255), rgb(255, 220, 120)];
+                        let c0 = pal[(hash2(ui / 6, 1, 3) * 3.0) as usize % 3];
+                        if (v - 17.0).abs() < 4.0 && (u - 0.5).abs() < 0.12 { shade(c0, 1.3) } else { shade(c0, 0.85) }
+                    } else if ui % 4 == 0 || (v as i32) % 5 == 0 {
+                        rgb(150, 146, 140)
+                    } else {
+                        rgb(200, 196, 188)
+                    }
+                }
+                _ => {
+                    if (24.0..28.0).contains(&v) {
+                        if ui % 2 == 0 { rgb(255, 60, 200) } else { rgb(60, 230, 255) }
+                    } else if v < 22.0 && v > 3.0 && (0.1..0.9).contains(&u) {
+                        rgb(20, 24, 34) // dark shop window
+                    } else {
+                        rgb(46, 44, 56)
+                    }
+                }
+            },
+        };
+        let lit = kind == 2 && f != Face::Top && (24.0..28.0).contains(&v);
+        Some(if lit { c } else { shade(c, k) })
+    });
+    (outline_image(&img), a)
 }
 
 fn make_cabinet() -> (Image, Vec2) {
@@ -1436,7 +1505,18 @@ impl Art {
         pistol.rect(1, 2, 2, 2, rgb(50, 40, 34));
         let (pimg, _) = pistol.finish();
         let pistol = Spr { r: p.add(&pimg), anchor: vec2(2.0, 3.0) };
-        let esc_step = (0..ESC_SLICES).map(|i| { let (img, a) = make_esc_step(esc_height(i)); Spr { r: p.add(&img), anchor: a } }).collect();
+        let esc_step = (0..ESC_SLICES).map(|i| { let (img, a) = make_esc_step(esc_height(i), i == 0); Spr { r: p.add(&img), anchor: a } }).collect();
+        let maze = (0..3).map(|k| { let (img, a) = make_maze_wall(k); Spr { r: p.add(&img), anchor: a } }).collect();
+        let mut coin_img = Image::gen_image_color(5, 5, Color::new(0., 0., 0., 0.));
+        for y in 0..5u32 {
+            for x in 0..5u32 {
+                let d = vec2(x as f32 - 2.0, y as f32 - 2.0).length();
+                if d < 2.4 {
+                    coin_img.set_pixel(x, y, if d < 1.2 { rgb(255, 236, 120) } else { rgb(220, 170, 40) });
+                }
+            }
+        }
+        let coin = p.add(&coin_img);
         let esc_rail = (0..ESC_SLICES).map(|i| { let (img, a) = make_esc_rail(esc_height(i)); Spr { r: p.add(&img), anchor: a } }).collect();
         let cabinet = { let (i, a) = make_cabinet(); Spr { r: p.add(&i), anchor: a } };
         let car_seat = { let (i, a) = make_car_seat(); Spr { r: p.add(&i), anchor: a } };
@@ -1449,6 +1529,8 @@ impl Art {
         tex.set_filter(FilterMode::Nearest);
 
         Art {
+            maze,
+            coin,
             commuters,
             strap,
             sit,

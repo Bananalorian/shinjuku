@@ -3,6 +3,42 @@
 Every version is one build sprint. Newest first. Versions are tagged in git, and
 each tag publishes a GitHub Release with downloads.
 
+## [0.6.0] - 2026-10-05 - Campaign and Arcade
+
+### Added
+- **Title menu: Campaign or Arcade.** Arcade is the original run, unchanged: five
+  stations from Akihabara to Shinjuku, the auto rifle, the flashlight from the
+  start, and upgrade cards on every train ride.
+- **Campaign** is the new story path:
+  - The opening now happens at **Kanda** (JY02). The train goes straight there
+    ("This train is bound for Ueno and Ikebukuro... the next station is Kanda").
+  - **The officer is a real cutscene.** Walk near the middle platform after
+    exploring and the camera pans over, letterbox bars come in, and you watch his
+    last stand play out: his own flashlight cutting through the dark, more of them
+    coming, "Kid! It's too dangerous here... take this!"
+  - Picking up the pistol **pauses the game until you fire it once**.
+  - Then a marker over the officer: **search his body** for coins and the flashlight.
+  - Hold out at Kanda (fewer zombies than arcade, but still plenty) until a train
+    comes, then ride it, with no upgrade cards, to...
+  - **Akihabara, opened up.** One big level: the platforms up top and a maze of
+    shuttered shops, poster walls and neon storefronts below. About 55 zombies are
+    already shambling around, and they only come for you when they see you, hear
+    gunshots, or get hit. Thirty bodies to **search for coins**, some empty.
+- **Coins**, shown bottom right in the campaign. They're the start of the merchant
+  economy.
+- **The flashlight is an item.** Find it, then toggle it with L, D-pad up, or the
+  LIGHT button on touch. The beam now starts at your hand, with a glow at the lens,
+  instead of at your feet.
+- Touch gets LIGHT and USE buttons. USE (F on keyboard, X on a controller)
+  searches bodies and plays the arcade cabinet, which still sits in Kanda.
+
+### Changed
+- **The escalator**, rebuilt: brushed-steel treads with yellow edge lines, a comb
+  plate, lit skirts, glass balustrades with black handrails, and more light on it.
+  The ride is twice as long, with the quake building a third of the way up.
+- The campaign has no upgrade cards; merchants will replace them.
+- Retrying in the campaign restarts the level you died on, with what you carried in.
+
 ## [0.5.0] - 2026-10-05 - The last normal commute
 
 ### Added

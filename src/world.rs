@@ -30,6 +30,13 @@ impl Default for Stats {
     }
 }
 
+impl Stats {
+    /// Arcade mode keeps the original auto rifle.
+    pub fn arcade() -> Self {
+        Stats { multishot: 1, dmg: 1.0, rate: 10.0, pierce: 1, ..Stats::default() }
+    }
+}
+
 pub struct Upgrade {
     pub name: &'static str,
     pub desc: &'static str,
@@ -91,6 +98,8 @@ pub struct Zombie {
     pub dead: bool,
     pub slam_t: f32,
     pub slam_cd: f32,
+    /// Campaign: shambling around until it sees or hears you.
+    pub idle: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -166,11 +175,14 @@ pub struct Npc {
     pub officer: bool,
     pub aim: Vec2,
     pub after: NpcState, // what to become on reaching the target
+    pub loot: u32,
+    pub searched: bool,
+    pub flashlight: bool,
 }
 
 impl Npc {
     pub fn new(pos: Vec2, look: usize, state: NpcState) -> Self {
-        Npc { pos, vel: Vec2::ZERO, home: pos, look, state, anim: rnd(0.0, 4.0), face_left: chance(0.5), back: false, z: 0.0, t: rnd(0.0, 3.0), target: pos, speed: rnd(1.5, 2.1), officer: false, aim: Vec2::X, after: NpcState::Gone }
+        Npc { pos, vel: Vec2::ZERO, home: pos, look, state, anim: rnd(0.0, 4.0), face_left: chance(0.5), back: false, z: 0.0, t: rnd(0.0, 3.0), target: pos, speed: rnd(1.5, 2.1), officer: false, aim: Vec2::X, after: NpcState::Gone, loot: 0, searched: false, flashlight: false }
     }
 }
 
@@ -328,6 +340,7 @@ pub enum Sfx {
     Scream(Vec2),
     Retch(Vec2),
     Attract(Vec2),
+    Coin,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -373,6 +386,14 @@ pub struct World {
     pub player_lying: bool,
     pub car_speed: f32,
     pub car_doors_open: bool,
+    pub campaign: bool,
+    /// Any campaign world (shows coins, allows searching bodies).
+    pub story: bool,
+    pub has_light: bool,
+    pub light_on: bool,
+    pub coins: u32,
+    pub floaters: Vec<(Vec2, String, f32, Color)>,
+    pub cam_focus: Option<Vec2>,
     kill_spots: Vec<Vec2>,
     bird_t: f32,
     loud: (Vec2, f32), // where and when something loud happened
@@ -496,6 +517,13 @@ impl World {
             player_lying: false,
             car_speed: 0.0,
             car_doors_open: false,
+            campaign: false,
+            story: false,
+            has_light: true,
+            light_on: true,
+            coins: 0,
+            floaters: Vec::new(),
+            cam_focus: None,
             kill_spots: Vec::new(),
             bird_t: 4.0,
             loud: (Vec2::ZERO, -99.0),
@@ -612,7 +640,14 @@ impl World {
         self.zombies.retain(|z| !z.dead);
 
         // camera follows with a little look-ahead toward where you aim
-        let target = iso(self.player.pos.x, self.player.pos.y) + self.player.aim_screen * 18.0 + vec2(0.0, -8.0);
+        let target = match self.cam_focus {
+            Some(f) => iso(f.x, f.y) + vec2(0.0, -8.0),
+            None => iso(self.player.pos.x, self.player.pos.y) + self.player.aim_screen * 18.0 + vec2(0.0, -8.0),
+        };
+        for f in &mut self.floaters {
+            f.2 += raw_dt;
+        }
+        self.floaters.retain(|f| f.2 < 1.6);
         self.cam += (target - self.cam) * (1.0 - (-6.0 * raw_dt).exp());
         self.shake *= (-7.0 * raw_dt).exp();
         self.flash = (self.flash - raw_dt * 3.0).max(0.0);
@@ -754,6 +789,23 @@ impl World {
 
     fn spawn(&mut self, dt: f32) {
         let alive = self.zombies.len();
+        if self.campaign && self.phase == Phase::Fight {
+            // campaign levels: a slow trickle of wanderers from the dark edges
+            self.spawn_acc += self.spawn_rate.0 * dt;
+            if self.spawn_acc >= 1.0 && alive < self.max_alive {
+                self.spawn_acc = 0.0;
+                let pts: Vec<Vec2> = self.map.edge_spawns.iter().chain(self.map.tunnel_spawns.iter()).copied().filter(|p| p.distance(self.player.pos) > 14.0).collect();
+                if !pts.is_empty() {
+                    let p = pts[rand::gen_range(0, pts.len())];
+                    let kind = self.pick_kind();
+                    self.add_zombie(kind, p);
+                    if let Some(z) = self.zombies.last_mut() {
+                        z.idle = true;
+                    }
+                }
+            }
+            return;
+        }
         let (rate, cap) = match self.phase {
             Phase::Fight => {
                 if self.kills as usize + alive >= self.quota as usize {
@@ -841,6 +893,7 @@ impl World {
             dead: false,
             slam_t: 0.0,
             slam_cd: 3.0,
+            idle: false,
         });
     }
 
@@ -917,7 +970,15 @@ impl World {
             z.attack_cd -= dt;
             let to_p = ppos - z.pos;
             let dist = to_p.length();
-            let mut desired = if !player_alive {
+            if z.idle {
+                let heard = self.time - self.loud.1 < 0.5 && z.pos.distance(self.loud.0) < 13.0;
+                if (player_alive && dist < 8.5) || heard || z.hp < z.max_hp {
+                    z.idle = false;
+                }
+            }
+            let mut desired = if z.idle {
+                vec2((z.age * 0.3 + z.id as f32).sin(), (z.age * 0.23 + z.id as f32 * 1.7).cos()) * 0.3
+            } else if !player_alive {
                 // wander and crowd around the body
                 if dist < 1.2 { Vec2::ZERO } else { to_p / dist * 0.5 }
             } else if dist < 1.8 || flow.is_none() {
@@ -961,7 +1022,7 @@ impl World {
                 z.face_left = sd.x < 0.0;
             }
             z.back = sd.y < -2.0;
-            if player_alive && dist < z.r + PLAYER_R + 0.12 && z.attack_cd <= 0.0 && z.age > 0.4 && z.slam_t <= 0.0 {
+            if player_alive && !z.idle && dist < z.r + PLAYER_R + 0.12 && z.attack_cd <= 0.0 && z.age > 0.4 && z.slam_t <= 0.0 {
                 z.attack_cd = 0.8;
                 let dmg = match z.kind {
                     ZKind::Walker => 10.0,
@@ -1259,6 +1320,75 @@ impl World {
         self.pickups.retain(|k| k.t < 18.0 || k.kind == PickupKind::Pistol);
     }
 
+    /// Campaign: zombies already shambling around the level when you arrive.
+    pub fn populate_idle(&mut self, n: usize) {
+        let mut tries = 0;
+        let mut placed = 0;
+        while placed < n && tries < n * 30 {
+            tries += 1;
+            let p = vec2(rnd(2.0, self.map.w as f32 - 1.0), rnd(2.0, self.map.h as f32 - 1.0));
+            if self.map.solid_at(p) || p.distance(self.player.pos) < 10.0 || self.map.blocked_at(p) {
+                continue;
+            }
+            let kind = self.pick_kind();
+            self.add_zombie(kind, p);
+            if let Some(z) = self.zombies.last_mut() {
+                z.idle = true;
+                z.age = 1.0;
+            }
+            placed += 1;
+        }
+    }
+
+    /// Campaign: the dead, some with coins in their pockets.
+    pub fn scatter_bodies(&mut self, n: usize) {
+        let mut tries = 0;
+        let mut placed = 0;
+        while placed < n && tries < n * 30 {
+            tries += 1;
+            let p = vec2(rnd(2.0, self.map.w as f32 - 1.0), rnd(2.0, self.map.h as f32 - 1.0));
+            if self.map.solid_at(p) || self.map.blocked_at(p) || self.map.tile(p.x, p.y) == Tile::Track || p.distance(self.player.pos) < 3.0 {
+                continue;
+            }
+            let mut b = Npc::new(p, rand::gen_range(0, 8), NpcState::Corpse);
+            b.face_left = chance(0.5);
+            b.loot = if chance(0.3) { 0 } else { rand::gen_range(5, 41) };
+            self.npcs.push(b);
+            self.map.stamp(p, rnd(0.4, 0.8), 2);
+            placed += 1;
+        }
+    }
+
+    /// The closest body you can still search, if you're standing next to one.
+    pub fn searchable(&self) -> Option<usize> {
+        self.npcs
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.state == NpcState::Corpse && !n.searched && n.pos.distance(self.player.pos) < 1.2)
+            .min_by(|a, b| a.1.pos.distance(self.player.pos).partial_cmp(&b.1.pos.distance(self.player.pos)).unwrap())
+            .map(|(i, _)| i)
+    }
+
+    /// Search a body: coins, and maybe something better. Returns true if it held the flashlight.
+    pub fn search(&mut self, i: usize) -> bool {
+        let n = &mut self.npcs[i];
+        n.searched = true;
+        let (pos, loot, light) = (n.pos, n.loot, n.flashlight);
+        if light {
+            self.has_light = true;
+            self.light_on = true;
+            self.floaters.push((pos, "FLASHLIGHT".to_string(), 0.0, Color::new(1.0, 0.95, 0.7, 1.0)));
+        }
+        if loot > 0 {
+            self.coins += loot;
+            self.floaters.push((pos + vec2(0.3, 0.3), format!("+{} COINS", loot), if light { -0.5 } else { 0.0 }, Color::new(1.0, 0.85, 0.3, 1.0)));
+            self.sfx.push(Sfx::Coin);
+        } else if !light {
+            self.floaters.push((pos, "NOTHING".to_string(), 0.0, Color::new(0.6, 0.6, 0.65, 1.0)));
+        }
+        light
+    }
+
     /// Fire a bullet from anyone (the officer in the opening).
     pub fn fire_bullet(&mut self, from: Vec2, dir: Vec2, dmg: f32) {
         let d = dir.normalize_or_zero();
@@ -1352,7 +1482,7 @@ impl World {
                 }
                 NpcState::Ride => {
                     if let Some((a, b)) = self.map.escalator {
-                        let f = (k.t / 3.2).min(1.0);
+                        let f = (k.t / 6.5).min(1.0);
                         k.pos = a.lerp(b, f);
                         k.z = f * crate::art::esc_height(crate::art::ESC_SLICES - 1) + 2.0;
                         k.anim += dt * 2.0;
