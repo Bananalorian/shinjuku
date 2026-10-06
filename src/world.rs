@@ -239,6 +239,13 @@ pub struct Ring {
     pub color: Color,
 }
 
+/// How much tougher everything is at stop `s` of the loop (1.0 at the start,
+/// about 3.4x by Ikebukuro, 5x by Shinjuku, 18x by the end) to keep pace with a
+/// growing stack of upgrade cards.
+pub fn loop_hp(s: f32) -> f32 {
+    1.0 + 0.08 * s + 0.016 * s * s
+}
+
 /// Each boss station has its own monster.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum BossKind {
@@ -285,15 +292,16 @@ impl BossKind {
             BossKind::PatientZero => Color::new(1.0, 0.5, 0.45, 1.0),
         }
     }
+    /// Base health, multiplied by how far round the loop it is.
     pub fn hp(&self) -> f32 {
         match self {
-            BossKind::RushHour => 600.0,
-            BossKind::Stampede => 320.0,
-            BossKind::Bloated => 480.0,
-            BossKind::Scramble => 640.0,
-            BossKind::Conductor => 820.0,
-            BossKind::Stationmaster => 1000.0,
-            BossKind::PatientZero => 1500.0,
+            BossKind::RushHour => 160.0,
+            BossKind::Stampede => 90.0,
+            BossKind::Bloated => 130.0,
+            BossKind::Scramble => 170.0,
+            BossKind::Conductor => 320.0,
+            BossKind::Stationmaster => 380.0,
+            BossKind::PatientZero => 520.0,
         }
     }
     pub fn speed(&self) -> f32 {
@@ -937,7 +945,9 @@ impl World {
         }
         let (rate, cap) = match self.phase {
             Phase::Fight => {
-                if self.kills as usize + alive >= self.quota as usize {
+                // a few spare zombies keep coming near the end, so one stuck somewhere
+                // unreachable can never stall the station
+                if self.kills as usize + alive >= self.quota as usize + 12 {
                     return;
                 }
                 let prog = self.kills as f32 / self.quota as f32;
@@ -995,10 +1005,16 @@ impl World {
     pub fn add_zombie(&mut self, kind: ZKind, pos: Vec2) {
         let s = self.station as f32;
         let (hp, r, speed, variants) = match kind {
-            ZKind::Walker => (3.0 + s * 0.22, 0.27, rnd(1.2, 1.75) * (1.0 + (s * 0.015).min(0.5)), 4),
-            ZKind::Runner => (2.0 + s * 0.15, 0.26, rnd(2.9, 3.4), 3),
-            ZKind::Brute => (22.0 + s * 1.5, 0.42, rnd(0.95, 1.15), 1),
-            ZKind::Boss => (if self.story { self.boss_kind.hp() } else { 900.0 }, 1.0, self.boss_kind.speed(), 1),
+            // the loop: toughness climbs to keep up with a stack of upgrade cards
+            ZKind::Walker if self.story => (3.0 * loop_hp(s), 0.27, rnd(1.2, 1.75) * (1.0 + (s * 0.012).min(0.35)), 4),
+            ZKind::Runner if self.story => (2.0 * loop_hp(s), 0.26, rnd(2.9, 3.4), 3),
+            ZKind::Brute if self.story => (22.0 * loop_hp(s), 0.42, rnd(0.95, 1.15), 1),
+            ZKind::Boss if self.story => (self.boss_kind.hp() * loop_hp(s), 1.0, self.boss_kind.speed(), 1),
+            // arcade: the original five-station numbers
+            ZKind::Walker => (3.0 + s * 0.5, 0.27, rnd(1.2, 1.75) * (1.0 + s * 0.05), 4),
+            ZKind::Runner => (2.0 + s * 0.3, 0.26, rnd(2.9, 3.4), 3),
+            ZKind::Brute => (22.0 + s * 4.0, 0.42, rnd(0.95, 1.15), 1),
+            ZKind::Boss => (900.0, 1.0, 1.9, 1),
         };
         let id = self.next_id;
         self.next_id += 1;
@@ -1639,7 +1655,7 @@ impl World {
                     self.hit_prop(pi, 999.0, dir);
                 }
                 if at.distance(ppos) < 1.3 && self.player.iframes <= 0.0 {
-                    self.damage_player(24.0, at);
+                    self.damage_player(if self.boss_kind == BossKind::Stampede { 18.0 } else { 24.0 }, at);
                     self.player.vel += dir * 10.0;
                 }
                 if self.map.solid_at(at + dir * 0.9) {
@@ -1664,8 +1680,8 @@ impl World {
                     self.sfx.push(Sfx::Roar);
                 }
                 if self.boss_cd[1] <= 0.0 {
-                    self.boss_cd[1] = 9.0;
-                    for k in 0..4 {
+                    self.boss_cd[1] = 11.0;
+                    for k in 0..3 {
                         let p = bpos + rand_dir() * (1.5 + k as f32 * 0.3);
                         self.add_zombie(ZKind::Walker, p);
                     }
@@ -1688,11 +1704,11 @@ impl World {
                 }
                 if self.boss_cd[1] <= 0.0 {
                     // the scramble: they come from every side at once
-                    self.boss_cd[1] = 7.5;
+                    self.boss_cd[1] = 9.0;
                     self.sfx.push(Sfx::Horn);
                     self.say("", "SCRAMBLE", 1.2);
-                    for k in 0..12 {
-                        let a = k as f32 * std::f32::consts::TAU / 12.0;
+                    for k in 0..10 {
+                        let a = k as f32 * std::f32::consts::TAU / 10.0;
                         let p = ppos + vec2(a.cos(), a.sin()) * 7.5;
                         if !self.map.solid_at(p) && self.map.tile(p.x, p.y) != Tile::Wall {
                             self.add_zombie(ZKind::Runner, p);

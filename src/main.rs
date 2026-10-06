@@ -845,6 +845,134 @@ fn env_flag(_name: &str) -> bool {
     false
 }
 
+/// A bot that kites, shoots, dashes out of trouble and throws grenades into crowds.
+/// Used by the balance simulator (it has perfect aim, so it's no slouch).
+#[cfg(not(target_arch = "wasm32"))]
+fn sim_bot(w: &World) -> Controls {
+    let mut c = Controls::default();
+    let p = w.player.pos;
+    let mut flee = Vec2::ZERO;
+    let mut near = 0;
+    let mut closest = f32::MAX;
+    let mut nearest_far: Option<Vec2> = None;
+    for z in w.zombies.iter().filter(|z| !z.dead) {
+        let d = p - z.pos;
+        let l = d.length().max(0.1);
+        closest = closest.min(l);
+        if l < 6.5 {
+            flee += d / (l * l) * if z.kind == ZKind::Boss { 3.0 } else { 1.0 };
+        }
+        if l < 4.5 {
+            near += 1;
+        }
+        if nearest_far.map_or(true, |n| (n - p).length() > l) {
+            nearest_far = Some(z.pos);
+        }
+    }
+    for h in &w.hazards {
+        let d = p - h.pos;
+        if d.length() < h.r + 1.2 && h.kind != HazardKind::Wave {
+            flee += d.normalize_or_zero() * 2.0;
+        }
+    }
+    if let (Some((dir, wind, _)), Some(b)) = (w.boss_charge, w.boss()) {
+        if wind > 0.0 {
+            // step out of the charge line
+            let side = vec2(-dir.y, dir.x);
+            let s = if (p - b.pos).dot(side) >= 0.0 { 1.0 } else { -1.0 };
+            flee += side * s * 3.0;
+        }
+    }
+    let mut mv = if flee.length() > 0.05 {
+        let f = flee.normalize();
+        // slide sideways a little so it doesn't back itself into a wall
+        f + vec2(-f.y, f.x) * 0.45
+    } else if let Some(t) = nearest_far {
+        if (t - p).length() > 5.0 { (t - p).normalize_or_zero() } else { Vec2::ZERO }
+    } else {
+        vec2((w.time * 0.3).sin(), (w.time * 0.23).cos())
+    };
+    if w.map.solid_at(p + mv.normalize_or_zero() * 0.8) {
+        mv = vec2(-mv.y, mv.x);
+    }
+    c.mv = world_to_screen_dir(mv).normalize_or_zero();
+    c.auto_aim = true;
+    c.fire = true;
+    c.dash = closest < 1.1 || w.hazards.iter().any(|h| h.kind == HazardKind::Wave && (h.pos.distance(p) - h.r).abs() < 0.9);
+    c.grenade = near >= 6;
+    c
+}
+
+/// Balance simulator: plays sample stops around the loop with the cards you'd have
+/// by then (and some permanent upgrades), and prints how each one went.
+#[cfg(not(target_arch = "wasm32"))]
+fn run_sim(game: &mut Game) {
+    use level::{loop_def, LOOP};
+    let meta_lvl: u8 = std::env::var("SJ_META").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+    let stops: Vec<usize> = std::env::var("SJ_SIM").ok().filter(|v| v.contains(',')).map(|v| v.split(',').filter_map(|n| n.parse().ok()).collect()).unwrap_or(vec![0, 2, 6, 10, 14, 17, 22, 28, 30]);
+    let mut meta = storage::Meta::default();
+    for k in 0..3 {
+        meta.levels[k] = meta_lvl.min(5);
+    }
+    // a sensible card order: fire rate, damage, an extra barrel, piercing, health...
+    let order = [2usize, 1, 0, 3, 5, 1, 2, 4, 6, 0, 1, 5, 2, 3, 1, 5];
+    println!("meta level {} (hp/dmg/rate)", meta_lvl);
+    println!("{:>3} {:<16} {:>5} {:>7} {:>7} {:>6} {:>7}", "#", "STATION", "QUOTA", "CLEAR s", "BOSS s", "HP LOST", "RESULT");
+    for &i in &stops {
+        let i = i.min(LOOP.len() - 1);
+        let mut st = shop::starting_stats(&meta);
+        for k in 0..=i {
+            (upgrades()[order[k % order.len()]].apply)(&mut st);
+        }
+        let def = loop_def(i);
+        let mut w = World::from_def(&def, "", i + 1, &game.art, st, 0, false);
+        w.story = true;
+        w.final_boss = i == LOOP.len() - 1;
+        w.boss_kind = match LOOP[i].name {
+            "UENO" => BossKind::Stampede,
+            "IKEBUKURO" => BossKind::Bloated,
+            "SHIBUYA" => BossKind::Scramble,
+            "SHINAGAWA" => BossKind::Conductor,
+            "TOKYO" => BossKind::Stationmaster,
+            "AKIHABARA" if w.final_boss => BossKind::PatientZero,
+            _ => BossKind::RushHour,
+        };
+        w.map.enable_breakables();
+        w.msg = None;
+        let dt = 1.0 / 30.0;
+        let (mut t, mut lost, mut boss_start, mut clear) = (0.0f32, 0.0f32, None, None);
+        let mut result = "TIMEOUT";
+        while t < 420.0 {
+            let c = sim_bot(&w);
+            let hp0 = w.player.hp;
+            w.update(dt, &c);
+            lost += (hp0 - w.player.hp).max(0.0);
+            w.sfx.clear();
+            t += dt;
+            if w.phase == Phase::Boss && boss_start.is_none() {
+                boss_start = Some(t);
+            }
+            if w.phase == Phase::Train || w.phase == Phase::Won {
+                clear = Some(t);
+                result = "CLEAR";
+                break;
+            }
+            if w.phase == Phase::Dead {
+                result = "DIED";
+                clear = Some(t);
+                break;
+            }
+            w.events.clear();
+        }
+        let boss_s = match (boss_start, clear) {
+            (Some(a), Some(b)) => format!("{:.0}", b - a),
+            (Some(_), None) => "-".into(),
+            _ => "".into(),
+        };
+        println!("{:>3} {:<16} {:>5} {:>7.0} {:>7} {:>6.0} {:>7}   kills {} alive {}", i, LOOP[i].name, def.quota, clear.unwrap_or(t), boss_s, lost, result, w.kills, w.zombies.len());
+    }
+}
+
 /// Debug only: plays through the opening by itself so it can be screenshotted.
 fn intro_autopilot(game: &mut Game, frame: u32) -> Controls {
     use intro::Stage::*;
@@ -944,6 +1072,12 @@ async fn main() {
     let mut game = Game::new(audio);
     if env_flag("SJ_NOTILT") {
         game.fx.tilt_shift = false;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::env::var("SJ_SIM").is_ok() {
+        rand::srand(11);
+        run_sim(&mut game);
+        return;
     }
     if let Some(d) = &dbg {
         rand::srand(7);

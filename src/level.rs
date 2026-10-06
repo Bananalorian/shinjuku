@@ -129,7 +129,7 @@ pub fn loop_def(i: usize) -> StationDef {
     let stop = &LOOP[i];
     let f = i as f32;
     let (width, bands, mult) = match stop.size {
-        0 => (36, vec![(Platform, 6), (Track, 3), (Platform, 7), (Track, 3), (Platform, 6), (Concourse, 6)], 0.8),
+        0 => (36, vec![(Platform, 6), (Track, 3), (Platform, 7), (Track, 3), (Platform, 6), (Concourse, 6)], 0.9),
         1 => (42, vec![(Platform, 7), (Track, 3), (Platform, 8), (Track, 3), (Platform, 6), (Concourse, 10)], 1.0),
         2 => (50, vec![(Platform, 6), (Track, 3), (Platform, 7), (Track, 3), (Platform, 5), (Concourse, 30)], 1.2),
         _ => (54, vec![(Platform, 6), (Track, 3), (Platform, 6), (Track, 3), (Platform, 6), (Track, 3), (Platform, 5), (Concourse, 28)], 1.4),
@@ -153,10 +153,10 @@ pub fn loop_def(i: usize) -> StationDef {
         width,
         bands,
         // like arcade: kill this many and the station is clear
-        quota: ((45.0 + f * 6.0) * mult) as u32,
-        max_alive: (45.0 + f * 7.0).min(320.0) as usize,
-        spawn_rate: ((1.4 + f * 0.18).min(10.0), (2.8 + f * 0.32).min(16.0)),
-        mix: [1.0, (0.08 + f * 0.03).min(0.8), if i >= 5 { (0.02 + f * 0.008).min(0.25) } else { 0.0 }],
+        quota: ((45.0 + f * 7.0) * mult) as u32,
+        max_alive: (45.0 + f * 10.0).min(360.0) as usize,
+        spawn_rate: ((1.4 + f * 0.3).min(10.0), (2.8 + f * 0.6).min(20.0)),
+        mix: [1.0, (0.08 + f * 0.035).min(0.9), if i >= 5 { (0.02 + f * 0.009).min(0.3) } else { 0.0 }],
         ambient,
         wall,
         floor,

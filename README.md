@@ -181,7 +181,9 @@ Renders scripted frames to `/tmp/sj_<frame>.png` and quits. `SJ_SCENE` can be
 `train`, `boss`, `bossnear`, `win`, `dead`, `upgrade`, `wall`, `crows`,
 `intro` (the opening from the top), `intro_after` (the opening from the quake on),
 `akiba` (a loop station; `SJ_LOOP=n` picks which, `SJ_POS=x,y` drops you somewhere,
-`SJ_BOSS=1` skips straight to its boss),
+`SJ_BOSS=1` skips straight to its boss). `SJ_SIM=1` runs the balance simulator: a
+bot plays sample stops around the loop and prints how each went (`SJ_META=2` adds
+permanent upgrades, `SJ_SIM=0,5,10` picks the stops).
 `ride` (Miyake's call on the train), `smash` (shoot a vending machine),
 `akiba_dead` (die in the loop and see the run-over screen), `shop` (the lockers with test coins),
 or `pos:X,Y` to drop the player at a spot. With `SJ_AUTO=1` the opening plays itself. `SJ_SIZE=844x390` simulates a phone

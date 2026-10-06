@@ -3,6 +3,38 @@
 Every version is one build sprint. Newest first. Versions are tagged in git, and
 each tag publishes a GitHub Release with downloads.
 
+## [0.13.0] - 2026-10-05 - Tuned all the way round
+
+Sprint 4 of 4: difficulty tuning across all 31 stops.
+
+### Added
+- **A balance simulator** (`SJ_SIM=1`, desktop only). A bot that kites, shoots
+  with perfect aim, dashes out of trouble, sidesteps charges, avoids acid and
+  throws grenades into crowds plays sample stops around the loop. It carries the
+  upgrade cards you'd realistically have by then (`SJ_META=n` adds permanent
+  upgrades) and prints clear time, boss fight time, damage taken and the result
+  for each stop. These numbers were tuned against it.
+
+### Changed
+- **Toughness keeps pace with your cards.** In the loop, zombie and boss health
+  scale with how far round you are: about 3.4x by Ikebukuro, 5x by Shinjuku,
+  10x by Shinagawa, 18x by the end. More zombies on screen and faster spawns
+  late, more runners mixed in, and brutes from the sixth stop.
+- **Boss health is set per boss** and scaled by stop, so fights last roughly
+  30-60 seconds for the bot, up to about two minutes at worst. The Stampede (the
+  first boss) is a little kinder: lighter charges and a smaller herd. The Scramble
+  sends 10 runners every 9 seconds instead of 12 every 7.5.
+- Arcade uses its original five-station zombie numbers again.
+
+### Fixed
+- **A station could softlock** if the last zombie got stuck somewhere unreachable,
+  because spawning stopped exactly at the quota. A few spare zombies now keep
+  coming near the end.
+
+Simulator results after tuning (bot, no permanent upgrades): every sampled stop
+cleared, boss fights 33-114 s, 0-97 HP lost per stop. With two levels of HP,
+damage and fire rate: every stop cleared, boss fights 24-106 s.
+
 ## [0.12.0] - 2026-10-05 - Seven monsters
 
 Sprint 3 of 4: boss variety.
