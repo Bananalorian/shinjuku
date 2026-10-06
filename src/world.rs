@@ -102,6 +102,8 @@ pub struct Zombie {
     pub slam_cd: f32,
     /// Campaign: shambling around until it sees or hears you.
     pub idle: bool,
+    /// How long it's been stranded far away (see `rescue_stragglers`).
+    pub far_t: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -746,6 +748,7 @@ impl World {
         self.update_pickups(dt);
         self.update_train(dt);
         self.update_particles(dt);
+        self.rescue_stragglers(dt);
         self.update_boss(dt);
         self.update_hazards(dt);
         self.update_birds(dt);
@@ -945,9 +948,8 @@ impl World {
         }
         let (rate, cap) = match self.phase {
             Phase::Fight => {
-                // a few spare zombies keep coming near the end, so one stuck somewhere
-                // unreachable can never stall the station
-                if self.kills as usize + alive >= self.quota as usize + 12 {
+                // exactly the quota spawns, no more: the station is clear when they're all dead
+                if self.kills as usize + alive >= self.quota as usize {
                     return;
                 }
                 let prog = self.kills as f32 / self.quota as f32;
@@ -1039,6 +1041,7 @@ impl World {
             slam_t: 0.0,
             slam_cd: 3.0,
             idle: false,
+            far_t: 0.0,
         });
     }
 
@@ -1598,6 +1601,38 @@ impl World {
         light
     }
 
+    /// Once every zombie for the station has spawned, one stuck far away (behind a
+    /// screen door, at the end of a tunnel) would stall the clear. After a few seconds
+    /// stranded, it shambles back in from a spawn point closer to you.
+    fn rescue_stragglers(&mut self, dt: f32) {
+        if self.phase != Phase::Fight || self.demo {
+            return;
+        }
+        let alive = self.zombies.iter().filter(|z| !z.dead).count();
+        if (self.kills as usize + alive) < self.quota as usize {
+            return; // still spawning; nothing to worry about yet
+        }
+        let ppos = self.player.pos;
+        let points: Vec<Vec2> = self.map.edge_spawns.iter().chain(self.map.tunnel_spawns.iter()).copied().collect();
+        for z in self.zombies.iter_mut().filter(|z| !z.dead && z.kind != ZKind::Boss) {
+            let far = z.pos.distance(ppos) > 16.0;
+            z.far_t = if far { z.far_t + dt } else { 0.0 };
+            if z.far_t > 6.0 {
+                z.far_t = 0.0;
+                let best = points
+                    .iter()
+                    .copied()
+                    .filter(|p| p.distance(ppos) > 7.0)
+                    .min_by(|a, b| a.distance(ppos).partial_cmp(&b.distance(ppos)).unwrap());
+                if let Some(p) = best {
+                    z.pos = p;
+                    z.vel = Vec2::ZERO;
+                    z.age = 0.0; // fades back in
+                }
+            }
+        }
+    }
+
     // ------------------------------------------------------------ bosses
 
     fn spawn_hazard(&mut self, kind: HazardKind, pos: Vec2, vel: Vec2, r: f32, life: f32) {
@@ -2038,7 +2073,7 @@ impl World {
     fn update_phase(&mut self, _dt: f32) {
         match self.phase {
             Phase::Fight => {
-                if self.kills >= self.quota && !self.demo {
+                if self.kills >= self.quota && self.zombies.iter().all(|z| z.dead) && !self.demo {
                     if self.has_boss {
                         self.phase = Phase::Boss;
                         self.phase_t = 0.0;

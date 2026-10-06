@@ -3,6 +3,21 @@
 Every version is one build sprint. Newest first. Versions are tagged in git, and
 each tag publishes a GitHub Release with downloads.
 
+## [0.13.1] - 2026-10-05 - All clear means all clear
+
+### Changed
+- **The kill count is hidden.** The HUD says CLEAR THE STATION with a progress bar
+  under the station name, but no numbers, in the loop and in Arcade.
+
+### Fixed
+- **STATION CLEAR could fire with zombies still on screen.** v0.13.0 let a few
+  spare zombies keep spawning past the quota (to stop a stuck zombie stalling a
+  station). Now, as originally in Arcade, exactly the quota spawns and the
+  station is clear only once every one of them is dead.
+- The stuck-zombie problem is solved a different way: once the last of them have
+  spawned, any zombie stranded far from you for a few seconds shambles back in
+  from a spawn point closer by.
+
 ## [0.13.0] - 2026-10-05 - Tuned all the way round
 
 Sprint 4 of 4: difficulty tuning across all 31 stops.

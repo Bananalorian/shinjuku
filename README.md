@@ -46,8 +46,8 @@ to clear the stations.
 ## The loop
 
 30 stations, from Akihabara all the way around the Yamanote line and back.
-It plays like Arcade: every station has a kill count, and when you hit it the
-station is clear and the train comes back for you. Pick an upgrade card on every
+It plays like Arcade: every station has a hidden number of zombies, and once
+every last one is dead the station is clear and the train comes back for you. Pick an upgrade card on every
 ride. Stations come in four sizes, from smaller stops up to huge three-track
 stations with underground halls, and it gets harder all the way round. It's a
 roguelike: die and the run is over. Smash vending machines, kiosks, bins and

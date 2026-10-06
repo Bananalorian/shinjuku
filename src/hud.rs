@@ -85,7 +85,7 @@ pub fn draw_hud(w: &World, art: &Art, u: f32, defs: &[StationDef], input: &Input
         Phase::Boss if w.story => "KILL IT".to_string(),
         Phase::Train => "BOARD THE TRAIN".to_string(),
         Phase::Boss => format!("KILL {}", w.boss_kind.name()),
-        _ => format!("CLEARED {}/{}", w.kills.min(w.quota), w.quota),
+        _ => "CLEAR THE STATION".to_string(), // the bar shows progress; the count stays hidden
     };
     text(art, &label, nx, m + 23.0 * u, u, DIM);
 
