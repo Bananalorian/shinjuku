@@ -52,9 +52,10 @@ ride. Stations come in four sizes, from smaller stops up to huge three-track
 stations with underground halls, and it gets harder all the way round. It's a
 roguelike: die and the run is over. Smash vending machines, kiosks, bins and
 luggage for coins, which are banked between runs and spent at the station's coin
-lockers on permanent upgrades before each new run. Bosses
-wait at the big stations: Ueno, Ikebukuro, Shinjuku, Shibuya, Shinagawa, Tokyo,
-and Akihabara at the end.
+lockers on permanent upgrades before each new run. A different boss waits at
+each big station: The Stampede at Ueno, The Bloated at Ikebukuro, The Rush Hour
+at Shinjuku, The Scramble at Shibuya, The Conductor at Shinagawa, The
+Stationmaster at Tokyo, and Patient Zero back at Akihabara at the end.
 
 ## Controls
 
@@ -179,7 +180,8 @@ SJ_SHOTS=60,300 SJ_STATION=1 SJ_SCENE=train SJ_AUTO=1 cargo run --release
 Renders scripted frames to `/tmp/sj_<frame>.png` and quits. `SJ_SCENE` can be
 `train`, `boss`, `bossnear`, `win`, `dead`, `upgrade`, `wall`, `crows`,
 `intro` (the opening from the top), `intro_after` (the opening from the quake on),
-`akiba` (a loop station; `SJ_LOOP=n` picks which, `SJ_POS=x,y` drops you somewhere),
+`akiba` (a loop station; `SJ_LOOP=n` picks which, `SJ_POS=x,y` drops you somewhere,
+`SJ_BOSS=1` skips straight to its boss),
 `ride` (Miyake's call on the train), `smash` (shoot a vending machine),
 `akiba_dead` (die in the loop and see the run-over screen), `shop` (the lockers with test coins),
 or `pos:X,Y` to drop the player at a spot. With `SJ_AUTO=1` the opening plays itself. `SJ_SIZE=844x390` simulates a phone

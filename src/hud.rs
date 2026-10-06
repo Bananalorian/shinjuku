@@ -84,7 +84,7 @@ pub fn draw_hud(w: &World, art: &Art, u: f32, defs: &[StationDef], input: &Input
     let label = match w.phase {
         Phase::Boss if w.story => "KILL IT".to_string(),
         Phase::Train => "BOARD THE TRAIN".to_string(),
-        Phase::Boss => "KILL THE RUSH HOUR".to_string(),
+        Phase::Boss => format!("KILL {}", w.boss_kind.name()),
         _ => format!("CLEARED {}/{}", w.kills.min(w.quota), w.quota),
     };
     text(art, &label, nx, m + 23.0 * u, u, DIM);
@@ -153,7 +153,7 @@ pub fn draw_hud(w: &World, art: &Art, u: f32, defs: &[StationDef], input: &Input
         let bw = (sw * 0.5).min(200.0 * u);
         let bx = (sw - bw) * 0.5;
         let byy = m + 48.0 * u;
-        text_c(art, "THE RUSH HOUR", sw * 0.5, byy - 9.0 * u, u, RED);
+        text_c(art, w.boss_kind.name(), sw * 0.5, byy - 9.0 * u, u, RED);
         bar(bx, byy, bw, 4.0 * u, b.hp / b.max_hp, RED, u);
     }
 

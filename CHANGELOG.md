@@ -3,6 +3,32 @@
 Every version is one build sprint. Newest first. Versions are tagged in git, and
 each tag publishes a GitHub Release with downloads.
 
+## [0.12.0] - 2026-10-05 - Seven monsters
+
+Sprint 3 of 4: boss variety.
+
+### Added
+- **A different boss at every boss station on the loop**, each with its own name,
+  colour and attacks:
+  - **Ueno: THE STAMPEDE.** Stops, shakes, and a red line shows where it's about to
+    charge. Then it rushes straight down that line, smashing through anything
+    breakable, and a herd of walkers follows it in.
+  - **Ikebukuro: THE BLOATED.** Slow, retching, lobbing arcs of acid that splash
+    into glowing pools you don't want to stand in. It bursts into a ring of acid
+    when it dies.
+  - **Shinjuku: THE RUSH HOUR.** The original: ground slams that throw off runners.
+  - **Shibuya: THE SCRAMBLE.** Quick lunges, and every few seconds a horn and a
+    ring of runners converging on you from every side.
+  - **Shinagawa: THE CONDUCTOR.** Fires fans of crackling sparks across the
+    platform, and blows a whistle that whips every zombie into a faster frenzy.
+  - **Tokyo: THE STATIONMASTER.** Slams, expanding shockwave rings you have to dash
+    through (dashing makes you invulnerable for a moment), and it calls in brutes.
+  - **Akihabara, the end: PATIENT ZERO.** Three phases as it's hurt: Stampede
+    charges first, then sparks and acid, then shockwaves and scrambles, getting
+    faster each time.
+- Boss hazards (acid pools, sparks, shockwaves, lobbed acid) light up the dark.
+- Arcade keeps The Rush Hour at Shinjuku, unchanged.
+
 ## [0.11.0] - 2026-10-05 - Coin lockers
 
 Sprint 2 of 4: the permanent upgrade shop.

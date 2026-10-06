@@ -239,6 +239,98 @@ pub struct Ring {
     pub color: Color,
 }
 
+/// Each boss station has its own monster.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum BossKind {
+    RushHour,      // Shinjuku (and Arcade): ground slams that throw off runners
+    Stampede,      // Ueno: telegraphed charges that smash through anything, and a herd behind it
+    Bloated,       // Ikebukuro: lobs acid that pools on the floor, bursts when it dies
+    Scramble,      // Shibuya: quick lunges, and a ring of runners converging from every side
+    Conductor,     // Shinagawa: fans of crackling sparks, a whistle that whips the dead into a frenzy
+    Stationmaster, // Tokyo: slams and expanding shockwaves you have to dash through, brings brutes
+    PatientZero,   // Akihabara, the end: all of it, in three phases
+}
+
+impl BossKind {
+    pub fn name(&self) -> &'static str {
+        match self {
+            BossKind::RushHour => "THE RUSH HOUR",
+            BossKind::Stampede => "THE STAMPEDE",
+            BossKind::Bloated => "THE BLOATED",
+            BossKind::Scramble => "THE SCRAMBLE",
+            BossKind::Conductor => "THE CONDUCTOR",
+            BossKind::Stationmaster => "THE STATIONMASTER",
+            BossKind::PatientZero => "PATIENT ZERO",
+        }
+    }
+    pub fn entrance(&self) -> &'static str {
+        match self {
+            BossKind::RushHour => "IT CAME OUT OF THE TUNNEL",
+            BossKind::Stampede => "SOMETHING IS CHARGING DOWN THE TRACKS",
+            BossKind::Bloated => "IT REEKS. DON'T STAND IN ANYTHING.",
+            BossKind::Scramble => "THEY'RE COMING FROM EVERY DIRECTION",
+            BossKind::Conductor => "THE RAILS ARE CRACKLING",
+            BossKind::Stationmaster => "DASH THROUGH THE SHOCKWAVES",
+            BossKind::PatientZero => "WHERE IT ALL STARTED",
+        }
+    }
+    pub fn tint(&self) -> Color {
+        match self {
+            BossKind::RushHour => WHITE,
+            BossKind::Stampede => Color::new(1.0, 0.8, 0.65, 1.0),
+            BossKind::Bloated => Color::new(0.7, 1.0, 0.55, 1.0),
+            BossKind::Scramble => Color::new(1.0, 0.65, 0.9, 1.0),
+            BossKind::Conductor => Color::new(0.65, 0.85, 1.0, 1.0),
+            BossKind::Stationmaster => Color::new(0.85, 0.75, 1.0, 1.0),
+            BossKind::PatientZero => Color::new(1.0, 0.5, 0.45, 1.0),
+        }
+    }
+    pub fn hp(&self) -> f32 {
+        match self {
+            BossKind::RushHour => 600.0,
+            BossKind::Stampede => 320.0,
+            BossKind::Bloated => 480.0,
+            BossKind::Scramble => 640.0,
+            BossKind::Conductor => 820.0,
+            BossKind::Stationmaster => 1000.0,
+            BossKind::PatientZero => 1500.0,
+        }
+    }
+    pub fn speed(&self) -> f32 {
+        match self {
+            BossKind::Bloated => 1.15,
+            BossKind::Scramble => 2.6,
+            BossKind::Stampede => 1.7,
+            _ => 1.9,
+        }
+    }
+    fn slams(&self) -> bool {
+        matches!(self, BossKind::RushHour | BossKind::Stationmaster | BossKind::PatientZero)
+    }
+}
+
+/// Things bosses leave in the world: acid pools, sparks, shockwaves, acid in flight.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum HazardKind {
+    Acid,
+    Spark,
+    Wave,
+    Blob,
+}
+
+#[derive(Clone, Copy)]
+pub struct Hazard {
+    pub kind: HazardKind,
+    pub pos: Vec2,
+    pub vel: Vec2,
+    pub z: f32,
+    pub vz: f32,
+    pub r: f32,
+    pub t: f32,
+    pub life: f32,
+    pub hit: bool,
+}
+
 /// Tokyo's crows. They peck around the platforms and scatter when you get close or start shooting.
 #[derive(Clone, Copy)]
 pub struct Bird {
@@ -380,6 +472,13 @@ pub struct World {
     pub rings: Vec<Ring>,
     pub ghosts: Vec<Ghost>,
     pub birds: Vec<Bird>,
+    pub boss_kind: BossKind,
+    pub hazards: Vec<Hazard>,
+    boss_cd: [f32; 4],
+    /// A charge: direction, windup left, dash left.
+    pub boss_charge: Option<(Vec2, f32, f32)>,
+    boss_phase: u8,
+    pub frenzy: f32,
     pub npcs: Vec<Npc>,
     pub npc_field: Vec<u16>,
     pub has_gun: bool,
@@ -521,6 +620,12 @@ impl World {
             rings: Vec::new(),
             ghosts: Vec::new(),
             birds: Vec::new(),
+            boss_kind: BossKind::RushHour,
+            hazards: Vec::new(),
+            boss_cd: [3.0, 5.0, 8.0, 6.0],
+            boss_charge: None,
+            boss_phase: 0,
+            frenzy: 0.0,
             npcs: Vec::new(),
             npc_field: Vec::new(),
             has_gun: true,
@@ -633,6 +738,8 @@ impl World {
         self.update_pickups(dt);
         self.update_train(dt);
         self.update_particles(dt);
+        self.update_boss(dt);
+        self.update_hazards(dt);
         self.update_birds(dt);
         self.update_npcs(dt);
         self.update_atmosphere(dt);
@@ -891,7 +998,7 @@ impl World {
             ZKind::Walker => (3.0 + s * 0.22, 0.27, rnd(1.2, 1.75) * (1.0 + (s * 0.015).min(0.5)), 4),
             ZKind::Runner => (2.0 + s * 0.15, 0.26, rnd(2.9, 3.4), 3),
             ZKind::Brute => (22.0 + s * 1.5, 0.42, rnd(0.95, 1.15), 1),
-            ZKind::Boss => (if self.story { 200.0 + s * 20.0 } else { 900.0 }, 1.0, 1.9, 1),
+            ZKind::Boss => (if self.story { self.boss_kind.hp() } else { 900.0 }, 1.0, self.boss_kind.speed(), 1),
         };
         let id = self.next_id;
         self.next_id += 1;
@@ -1011,8 +1118,11 @@ impl World {
             if self.demo {
                 desired = vec2((z.age * 0.7 + z.id as f32).sin(), (z.age * 0.5 + z.id as f32 * 1.7).cos()) * 0.4;
             }
-            let mut speed = z.speed;
-            if z.kind == ZKind::Boss {
+            let mut speed = z.speed * if self.frenzy > 0.0 && z.kind != ZKind::Boss { 1.5 } else { 1.0 };
+            if z.kind == ZKind::Boss && self.boss_charge.is_some() {
+                speed = 0.0;
+            }
+            if z.kind == ZKind::Boss && self.boss_kind.slams() {
                 z.slam_cd -= dt;
                 if z.slam_t > 0.0 {
                     z.slam_t -= dt;
@@ -1143,6 +1253,18 @@ impl World {
         }
         if kind == ZKind::Brute {
             self.shake = (self.shake + 0.2).min(1.0);
+        }
+        if kind == ZKind::Boss {
+            self.hazards.clear();
+            self.boss_charge = None;
+            self.frenzy = 0.0;
+            if self.boss_kind == BossKind::Bloated {
+                for k in 0..8 {
+                    let a = k as f32 * std::f32::consts::TAU / 8.0;
+                    let p = pos + vec2(a.cos(), a.sin()) * 2.2;
+                    self.hazards.push(Hazard { kind: HazardKind::Acid, pos: p, vel: Vec2::ZERO, z: 0.0, vz: 0.0, r: 1.1, t: 0.0, life: 4.0, hit: false });
+                }
+            }
         }
         if kind == ZKind::Boss && self.story && !self.final_boss {
             // mid-loop bosses: the station is yours, and the train comes
@@ -1460,6 +1582,215 @@ impl World {
         light
     }
 
+    // ------------------------------------------------------------ bosses
+
+    fn spawn_hazard(&mut self, kind: HazardKind, pos: Vec2, vel: Vec2, r: f32, life: f32) {
+        self.hazards.push(Hazard { kind, pos, vel, z: 0.0, vz: 0.0, r, t: 0.0, life, hit: false });
+    }
+
+    fn lob_acid(&mut self, from: Vec2, to: Vec2) {
+        let flight = 0.9;
+        self.hazards.push(Hazard { kind: HazardKind::Blob, pos: from, vel: (to - from) / flight, z: 28.0, vz: 150.0, r: 0.3, t: 0.0, life: 3.0, hit: false });
+    }
+
+    fn update_boss(&mut self, dt: f32) {
+        self.frenzy = (self.frenzy - dt).max(0.0);
+        let Some(bi) = self.zombies.iter().position(|z| z.kind == ZKind::Boss && !z.dead) else {
+            self.boss_charge = None;
+            return;
+        };
+        let ppos = self.player.pos;
+        let (bpos, hp, max_hp) = (self.zombies[bi].pos, self.zombies[bi].hp, self.zombies[bi].max_hp);
+        let to_p = ppos - bpos;
+        for c in &mut self.boss_cd {
+            *c -= dt;
+        }
+        let mut kind = self.boss_kind;
+        // Patient Zero changes as it's hurt: each phase adds what the others did
+        if kind == BossKind::PatientZero {
+            let phase = if hp > max_hp * 0.66 { 0 } else if hp > max_hp * 0.33 { 1 } else { 2 };
+            if phase != self.boss_phase {
+                self.boss_phase = phase;
+                self.sfx.push(Sfx::Roar);
+                self.shake = 1.0;
+                self.flash = 0.3;
+                self.say("PATIENT ZERO", if phase == 1 { "IT'S CHANGING" } else { "IT'S ANGRY NOW" }, 2.5);
+                self.zombies[bi].speed = BossKind::PatientZero.speed() * (1.0 + 0.15 * phase as f32);
+            }
+            kind = match (phase, (self.time as i32 / 6) % 2) {
+                (0, _) => BossKind::Stampede,
+                (1, 0) => BossKind::Conductor,
+                (1, _) => BossKind::Bloated,
+                (_, 0) => BossKind::Stationmaster,
+                _ => BossKind::Scramble,
+            };
+        }
+
+        // charges: wind up (you see the line), then a straight-line rush that smashes everything
+        if let Some((dir, wind, run)) = self.boss_charge {
+            if wind > 0.0 {
+                self.boss_charge = Some((dir, wind - dt, run));
+            } else if run > 0.0 {
+                let step = dir * 13.0 * dt;
+                self.zombies[bi].pos += step;
+                self.zombies[bi].vel = dir * 13.0;
+                let at = self.zombies[bi].pos;
+                if let Some(pi) = self.map.breakable_at(at) {
+                    self.hit_prop(pi, 999.0, dir);
+                }
+                if at.distance(ppos) < 1.3 && self.player.iframes <= 0.0 {
+                    self.damage_player(24.0, at);
+                    self.player.vel += dir * 10.0;
+                }
+                if self.map.solid_at(at + dir * 0.9) {
+                    self.boss_charge = None;
+                    self.shake = 0.8;
+                    self.sfx.push(Sfx::Slam(at));
+                } else {
+                    self.boss_charge = Some((dir, 0.0, run - dt));
+                }
+            } else {
+                self.boss_charge = None;
+            }
+            return;
+        }
+
+        match kind {
+            BossKind::RushHour => {}
+            BossKind::Stampede => {
+                if self.boss_cd[0] <= 0.0 && to_p.length() < 11.0 {
+                    self.boss_cd[0] = 4.6;
+                    self.boss_charge = Some((to_p.normalize_or_zero(), 0.9, 0.85));
+                    self.sfx.push(Sfx::Roar);
+                }
+                if self.boss_cd[1] <= 0.0 {
+                    self.boss_cd[1] = 9.0;
+                    for k in 0..4 {
+                        let p = bpos + rand_dir() * (1.5 + k as f32 * 0.3);
+                        self.add_zombie(ZKind::Walker, p);
+                    }
+                }
+            }
+            BossKind::Bloated => {
+                if self.boss_cd[0] <= 0.0 {
+                    self.boss_cd[0] = 3.4;
+                    for k in 0..3 {
+                        let spread = vec2(-to_p.y, to_p.x).normalize_or_zero() * (k as f32 - 1.0) * 1.8;
+                        self.lob_acid(bpos, ppos + spread + self.player.vel * 0.4);
+                    }
+                    self.sfx.push(Sfx::Retch(bpos));
+                }
+            }
+            BossKind::Scramble => {
+                if self.boss_cd[0] <= 0.0 && to_p.length() < 8.0 {
+                    self.boss_cd[0] = 3.0;
+                    self.boss_charge = Some((to_p.normalize_or_zero(), 0.4, 0.45));
+                }
+                if self.boss_cd[1] <= 0.0 {
+                    // the scramble: they come from every side at once
+                    self.boss_cd[1] = 7.5;
+                    self.sfx.push(Sfx::Horn);
+                    self.say("", "SCRAMBLE", 1.2);
+                    for k in 0..12 {
+                        let a = k as f32 * std::f32::consts::TAU / 12.0;
+                        let p = ppos + vec2(a.cos(), a.sin()) * 7.5;
+                        if !self.map.solid_at(p) && self.map.tile(p.x, p.y) != Tile::Wall {
+                            self.add_zombie(ZKind::Runner, p);
+                        }
+                    }
+                }
+            }
+            BossKind::Conductor => {
+                if self.boss_cd[0] <= 0.0 {
+                    self.boss_cd[0] = 2.6;
+                    let base = to_p.normalize_or_zero();
+                    for k in 0..5 {
+                        let a = (k as f32 - 2.0) * 0.28;
+                        let d = vec2(base.x * a.cos() - base.y * a.sin(), base.x * a.sin() + base.y * a.cos());
+                        self.spawn_hazard(HazardKind::Spark, bpos + d * 0.8, d * 5.5, 0.35, 2.8);
+                    }
+                    self.sfx.push(Sfx::Zap(bpos));
+                }
+                if self.boss_cd[1] <= 0.0 {
+                    // the whistle: every one of them speeds up
+                    self.boss_cd[1] = 10.0;
+                    self.frenzy = 4.0;
+                    self.sfx.push(Sfx::Horn);
+                    self.say("", "THE WHISTLE. THEY'RE FASTER.", 1.6);
+                }
+            }
+            BossKind::Stationmaster => {
+                if self.boss_cd[0] <= 0.0 {
+                    self.boss_cd[0] = 5.0;
+                    self.spawn_hazard(HazardKind::Wave, bpos, Vec2::ZERO, 0.6, 1.25);
+                    self.sfx.push(Sfx::Slam(bpos));
+                    self.shake = 0.6;
+                }
+                if self.boss_cd[2] <= 0.0 {
+                    self.boss_cd[2] = 13.0;
+                    for _ in 0..2 {
+                        let p = bpos + rand_dir() * 2.5;
+                        self.add_zombie(ZKind::Brute, p);
+                    }
+                }
+            }
+            BossKind::PatientZero => {}
+        }
+    }
+
+    fn update_hazards(&mut self, dt: f32) {
+        let ppos = self.player.pos;
+        let mut hurt: Vec<(f32, Vec2)> = Vec::new();
+        let mut pools: Vec<Vec2> = Vec::new();
+        for h in &mut self.hazards {
+            h.t += dt;
+            match h.kind {
+                HazardKind::Acid => {
+                    if h.pos.distance(ppos) < h.r && (h.t * 4.0).fract() < dt * 4.0 {
+                        hurt.push((5.0, h.pos)); // about 20 a second while you stand in it
+                    }
+                }
+                HazardKind::Spark => {
+                    h.pos += h.vel * dt;
+                    if !h.hit && h.pos.distance(ppos) < h.r + 0.25 {
+                        h.hit = true;
+                        h.t = h.life;
+                        hurt.push((12.0, h.pos));
+                    }
+                }
+                HazardKind::Wave => {
+                    h.r += 7.0 * dt;
+                    let d = h.pos.distance(ppos);
+                    if !h.hit && (d - h.r).abs() < 0.45 {
+                        h.hit = true;
+                        hurt.push((16.0, h.pos));
+                    }
+                }
+                HazardKind::Blob => {
+                    h.pos += h.vel * dt;
+                    h.vz -= 420.0 * dt;
+                    h.z += h.vz * dt;
+                    if h.z <= 0.0 {
+                        h.t = h.life;
+                        pools.push(h.pos);
+                    }
+                }
+            }
+        }
+        for (dmg, from) in hurt {
+            if self.player.iframes <= 0.0 || dmg < 6.0 {
+                self.damage_player(dmg, from);
+            }
+        }
+        for p in pools {
+            self.spawn_hazard(HazardKind::Acid, p, Vec2::ZERO, 1.15, 4.5);
+            self.sfx.push(Sfx::Splat(p, ZKind::Walker));
+        }
+        // sparks die on walls; everything else when its time is up
+        let map = &self.map;
+        self.hazards.retain(|h| h.t < h.life && !(h.kind == HazardKind::Spark && map.solid_at(h.pos)));
+    }
+
     /// Debug: stop new zombies arriving.
     pub fn max_alive_override(&mut self, n: usize) {
         self.max_alive = n;
@@ -1702,7 +2033,9 @@ impl World {
                         self.add_zombie(ZKind::Boss, at);
                         self.sfx.push(Sfx::Roar);
                         self.shake = 1.0;
-                        self.say("THE RUSH HOUR", "IT CAME OUT OF THE TUNNEL", 3.5);
+                        self.boss_cd = [3.0, 5.0, 8.0, 6.0];
+                        self.boss_phase = 0;
+                        self.say(self.boss_kind.name(), self.boss_kind.entrance(), 3.5);
                     } else {
                         self.phase = Phase::Train;
                         self.phase_t = 0.0;

@@ -271,6 +271,15 @@ impl Game {
         w.loop_pos = Some((i, LOOP.len()));
         w.next_name = LOOP.get(i + 1).map(|n| n.name.to_string()).unwrap_or_default();
         w.final_boss = i == LOOP.len() - 1;
+        w.boss_kind = match LOOP[i].name {
+            "UENO" => BossKind::Stampede,
+            "IKEBUKURO" => BossKind::Bloated,
+            "SHIBUYA" => BossKind::Scramble,
+            "SHINAGAWA" => BossKind::Conductor,
+            "TOKYO" => BossKind::Stationmaster,
+            "AKIHABARA" if w.final_boss => BossKind::PatientZero,
+            _ => BossKind::RushHour,
+        };
         w.has_light = self.camp.has_light;
         w.light_on = self.camp.light_on;
         w.coins = self.camp.coins;
@@ -995,6 +1004,10 @@ async fn main() {
             game.start_loop(std::env::var("SJ_LOOP").ok().and_then(|v| v.parse().ok()).unwrap_or(0));
             if d.scene == "akiba_clear" {
                 game.world.kills = game.world.quota;
+            }
+            if std::env::var("SJ_BOSS").is_ok() {
+                game.world.kills = game.world.quota;
+                game.world.player.iframes = 999.0;
             }
             #[cfg(not(target_arch = "wasm32"))]
             if let Ok(pos) = std::env::var("SJ_POS") {

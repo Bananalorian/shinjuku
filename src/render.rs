@@ -250,6 +250,7 @@ impl Fx {
         clear_background(BLACK);
         draw_texture(&w.map.floor_tex, w.map.origin.x, w.map.origin.y, WHITE);
         draw_car_outside(w, art);
+        draw_ground_hazards(w, art);
         draw_rings(w, art);
         draw_sorted(w, art, view);
         draw_xray(w, art);
@@ -257,6 +258,7 @@ impl Fx {
         gl_use_material(&self.add);
         draw_particles(w, art, true, view);
         draw_bullets(w, art);
+        draw_air_hazards(w, art);
         draw_car_windows(w, art);
         draw_torch_glow(w, art);
         gl_use_default_material();
@@ -600,13 +602,74 @@ fn draw_zombie(w: &World, art: &Art, z: &Zombie) {
     if z.kind == ZKind::Boss && z.slam_t > 0.0 {
         at += vec2(rnd(-1.0, 1.0), -((0.9 - z.slam_t) * 10.0).min(8.0));
     }
+    if z.kind == ZKind::Boss && w.boss_charge.map_or(false, |c| c.1 > 0.0) {
+        at += vec2(rnd(-1.5, 1.5), 0.0); // shaking with the windup
+    }
+    let tint = if z.kind == ZKind::Boss { w.boss_kind.tint() } else { WHITE };
     if z.flash > 0.0 && z.kind == ZKind::Boss {
-        spr(art, &ca.frames[view][frame], at, z.face_left, WHITE);
+        spr(art, &ca.frames[view][frame], at, z.face_left, tint);
         spr(art, &ca.flash[view][frame], at, z.face_left, Color::new(1.0, 0.85, 0.8, 0.45));
     } else if z.flash > 0.0 {
         spr(art, &ca.flash[view][frame], at, z.face_left, Color::new(1.0, 1.0, 1.0, alpha));
     } else {
-        spr(art, &ca.frames[view][frame], at, z.face_left, Color::new(1.0, 1.0, 1.0, alpha));
+        spr(art, &ca.frames[view][frame], at, z.face_left, Color::new(tint.r, tint.g, tint.b, alpha));
+    }
+}
+
+/// Acid on the floor, and the line a boss is about to charge down. Drawn under everyone.
+fn draw_ground_hazards(w: &World, art: &Art) {
+    for h in &w.hazards {
+        if h.kind == HazardKind::Acid {
+            let at = iso(h.pos.x, h.pos.y);
+            let fade = (h.t * 3.0).min(1.0) * ((h.life - h.t) * 1.5).min(1.0);
+            let wob = 1.0 + (w.time * 6.0 + h.pos.x).sin() * 0.05;
+            let (rw, rh) = (h.r * HALF_W * 2.0 * wob, h.r * HALF_H * 2.0 * wob);
+            draw_texture_ex(&art.tex, at.x - rw * 0.5, at.y - rh * 0.5, Color::new(0.45, 0.9, 0.25, 0.55 * fade), DrawTextureParams { source: Some(art.soft), dest_size: Some(vec2(rw, rh)), ..Default::default() });
+            draw_texture_ex(&art.tex, at.x - rw * 0.3, at.y - rh * 0.3, Color::new(0.75, 1.0, 0.4, 0.4 * fade), DrawTextureParams { source: Some(art.soft), dest_size: Some(vec2(rw * 0.6, rh * 0.6)), ..Default::default() });
+        }
+    }
+    if let (Some((dir, wind, _)), Some(b)) = (w.boss_charge, w.boss()) {
+        if wind > 0.0 {
+            let a = iso(b.pos.x, b.pos.y);
+            let e = iso(b.pos.x + dir.x * 11.0, b.pos.y + dir.y * 11.0);
+            let pulse = 0.3 + 0.3 * (w.time * 20.0).sin().abs();
+            draw_line(a.x, a.y, e.x, e.y, 6.0, Color::new(1.0, 0.15, 0.1, pulse));
+            draw_line(a.x, a.y, e.x, e.y, 2.0, Color::new(1.0, 0.6, 0.4, pulse + 0.2));
+        }
+    }
+}
+
+/// Sparks, shockwaves and acid in flight, drawn over everything.
+fn draw_air_hazards(w: &World, art: &Art) {
+    for h in &w.hazards {
+        match h.kind {
+            HazardKind::Spark => {
+                let at = iso3(h.pos.x, h.pos.y, w.map.ground_z(h.pos) + 6.0);
+                let flick = rnd(3.0, 6.0);
+                draw_texture_ex(&art.tex, at.x - flick, at.y - flick, Color::new(0.6, 0.85, 1.0, 0.9), DrawTextureParams { source: Some(art.soft), dest_size: Some(vec2(flick * 2.0, flick * 2.0)), ..Default::default() });
+                draw_rectangle(at.x - 1.0, at.y - 1.0, 2.0, 2.0, WHITE);
+            }
+            HazardKind::Wave => {
+                let c = iso(h.pos.x, h.pos.y);
+                let n = 40;
+                let fade = 1.0 - h.t / h.life;
+                for k in 0..n {
+                    let a0 = k as f32 / n as f32 * std::f32::consts::TAU;
+                    let a1 = (k + 1) as f32 / n as f32 * std::f32::consts::TAU;
+                    let p0 = c + vec2((a0.cos() - a0.sin()) * HALF_W, (a0.cos() + a0.sin()) * HALF_H) * h.r;
+                    let p1 = c + vec2((a1.cos() - a1.sin()) * HALF_W, (a1.cos() + a1.sin()) * HALF_H) * h.r;
+                    draw_line(p0.x, p0.y, p1.x, p1.y, 3.0, Color::new(1.0, 0.55, 0.2, 0.8 * fade));
+                }
+            }
+            HazardKind::Blob => {
+                let g = iso(h.pos.x, h.pos.y);
+                shadow(art, g, 0.4);
+                let at = iso3(h.pos.x, h.pos.y, h.z);
+                draw_circle(at.x, at.y, 3.0, Color::new(0.55, 0.95, 0.3, 1.0));
+                draw_circle(at.x - 1.0, at.y - 1.0, 1.2, Color::new(0.9, 1.0, 0.7, 1.0));
+            }
+            HazardKind::Acid => {}
+        }
     }
 }
 
@@ -911,6 +974,19 @@ fn draw_lights(w: &World, view: Rect) {
             light_circle(k.pos, 0.6, Color::new(1.0, 0.85, 0.3, 1.0), 0.25);
         } else {
             light_circle(k.pos, 1.2, Color::new(0.6, 1.0, 0.7, 1.0), 0.35);
+        }
+    }
+    for h in &w.hazards {
+        match h.kind {
+            HazardKind::Spark => light_circle(h.pos, 1.6, Color::new(0.5, 0.75, 1.0, 1.0), 0.6),
+            HazardKind::Acid => light_circle(h.pos, h.r * 1.4, Color::new(0.4, 0.9, 0.2, 1.0), 0.25),
+            HazardKind::Wave => {}
+            HazardKind::Blob => light_circle(h.pos, 0.8, Color::new(0.5, 1.0, 0.3, 1.0), 0.3),
+        }
+    }
+    if w.frenzy > 0.0 {
+        if let Some(b) = w.boss() {
+            light_circle(b.pos, 4.0, Color::new(0.5, 0.7, 1.0, 1.0), 0.25 * (w.time * 10.0).sin().abs());
         }
     }
     // the officer's own flashlight, so you can see his last stand
